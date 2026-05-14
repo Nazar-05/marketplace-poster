@@ -1,0 +1,37 @@
+.photo-manager { border:1.5px solid #e0e0e0; border-radius:10px; padding:14px; background:#fafafa; }
+
+.pm-label { font-size:12px; font-weight:600; color:#555; margin-bottom:10px; display:flex; justify-content:space-between; }
+.pm-count { color:#aaa; font-weight:400; }
+
+/* Grid */
+.pm-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(90px,1fr)); gap:8px; margin-bottom:12px; }
+
+.pm-item { position:relative; border-radius:8px; overflow:hidden; background:#f0f0f0; aspect-ratio:1; border:1.5px solid #e0e0e0; }
+.pm-main { border-color:#4f46e5; }
+.pm-main-badge { position:absolute; top:4px; left:4px; background:#4f46e5; color:#fff; font-size:9px; padding:2px 6px; border-radius:4px; font-weight:600; z-index:2; }
+
+.pm-img { width:100%; height:100%; object-fit:cover; display:block; }
+
+.pm-controls { position:absolute; bottom:0; left:0; right:0; display:flex; background:rgba(0,0,0,.55); opacity:0; transition:opacity .15s; }
+.pm-item:hover .pm-controls { opacity:1; }
+
+.pm-btn { flex:1; border:none; background:transparent; color:#fff; font-size:13px; padding:5px 0; cursor:pointer; }
+.pm-btn:disabled { opacity:.3; cursor:default; }
+.pm-btn:hover:not(:disabled) { background:rgba(255,255,255,.15); }
+.pm-del { color:#ff7675; }
+
+.pm-empty { text-align:center; color:#bbb; font-size:13px; padding:20px; border:1.5px dashed #e0e0e0; border-radius:8px; margin-bottom:12px; }
+
+/* Add */
+.pm-add { display:flex; flex-direction:column; gap:6px; }
+.pm-add-row { display:flex; gap:6px; }
+.pm-url-input { flex:1; padding:8px 10px; border:1.5px solid #e0e0e0; border-radius:8px; font-size:12px; }
+.pm-url-input:focus { outline:none; border-color:#4f46e5; }
+.pm-add-btn { padding:8px 12px; background:#4f46e5; color:#fff; border:none; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; white-space:nowrap; }
+.pm-add-btn:disabled { background:#ccc; cursor:not-allowed; }
+.pm-or { text-align:center; font-size:11px; color:#bbb; }
+.pm-upload-btn { display:flex; align-items:center; justify-content:center; gap:6px; padding:8px; border:1.5px dashed #ddd; border-radius:8px; font-size:12px; color:#666; cursor:pointer; text-align:center; }
+.pm-upload-btn:hover { border-color:#4f46e5; color:#4f46e5; background:#f0effe; }
+
+.pm-error { margin-top:8px; font-size:12px; color:#c62828; background:#ffebee; padding:6px 10px; border-radius:6px; }
+.pm-hint  { margin-top:8px; font-size:11px; color:#bbb; }

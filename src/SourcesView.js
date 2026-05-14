@@ -1,0 +1,205 @@
+import { useState, useEffect } from "react";
+
+const SERVER = "http://localhost:5001";
+
+const CRM_TYPES = [
+  { id:"mydrop", name:"MyDrop",  icon:"🟠", field:"mydrop_token",  label:"API Токен", hint:"MyDrop → Інтеграції → API", placeholder:"Вставте токен...", link:"https://mydrop.com.ua" },
+  { id:"keycrm", name:"KeyCRM",  icon:"🟣", field:"keycrm_key",   label:"API Ключ",  hint:"KeyCRM → Налаштування → API", placeholder:"Вставте ключ...",  link:"https://keycrm.app" },
+];
+
+export default function SourcesView({ serverOnline, onProductsLoaded }) {
+  const [settings, setSettings]   = useState({ telegram_mode:"public", telegram_channels:[], has_mydrop_token:false, has_keycrm_key:false, has_telegram_api:false });
+  const [channels, setChannels]   = useState([""]);
+  const [apiKeys, setApiKeys]     = useState({ mydrop_token:"", keycrm_key:"", telegram_api_id:"", telegram_api_hash:"" });
+  const [tgMode, setTgMode]       = useState("public");
+  const [syncing, setSyncing]     = useState({});
+  const [logs, setLogs]           = useState({});
+  const [saved, setSaved]         = useState(false);
+
+  useEffect(() => {
+    if (!serverOnline) return;
+    fetch(`${SERVER}/settings`).then(r => r.json()).then(d => {
+      setSettings(d);
+      setTgMode(d.telegram_mode || "public");
+      setChannels(d.telegram_channels?.length ? d.telegram_channels : [""]);
+    }).catch(() => {});
+  }, [serverOnline]);
+
+  function addLog(source, msg) {
+    setLogs(l => ({ ...l, [source]: [...(l[source] || []), msg] }));
+  }
+
+  // ── Зберегти налаштування ──
+  async function save() {
+    if (!serverOnline) return;
+    const chs = channels.filter(c => c.trim());
+    await fetch(`${SERVER}/settings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...apiKeys, telegram_mode: tgMode, telegram_channels: chs }),
+    });
+    const fresh = await fetch(`${SERVER}/settings`).then(r => r.json());
+    setSettings(fresh);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  }
+
+  // ── Синхронізація з джерелом ──
+  async function sync(source) {
+    if (!serverOnline) return;
+    setSyncing(s => ({ ...s, [source]: true }));
+    setLogs(l => ({ ...l, [source]: [] }));
+    addLog(source, `🔄 Синхронізація з ${source}...`);
+    try {
+      const res  = await fetch(`${SERVER}/sync/${source}`, { method: "POST" });
+      const data = await res.json();
+      if (data.error) {
+        addLog(source, `❌ ${data.error}`);
+      } else {
+        addLog(source, `✅ Отримано: ${data.total} товарів`);
+        addLog(source, `🆕 Нових: ${data.new_count}`);
+        addLog(source, `🔁 Дублікатів пропущено: ${data.skipped}`);
+        if (onProductsLoaded) onProductsLoaded();
+      }
+    } catch {
+      addLog(source, "❌ Сервер недоступний");
+    }
+    setSyncing(s => ({ ...s, [source]: false }));
+  }
+
+  function setChannel(i, val) {
+    const arr = [...channels]; arr[i] = val; setChannels(arr);
+  }
+  function addChannel()    { setChannels(c => [...c, ""]); }
+  function removeChannel(i){ setChannels(c => c.filter((_, idx) => idx !== i)); }
+
+  const hasKey = { mydrop: settings.has_mydrop_token, keycrm: settings.has_keycrm_key };
+
+  return (
+    <div className="card">
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+        <h2 style={{ margin:0 }}>🔌 Джерела даних</h2>
+        <button className="btn-primary" onClick={save} disabled={!serverOnline} style={{ fontSize:13, padding:"8px 16px" }}>
+          {saved ? "✓ Збережено!" : "💾 Зберегти"}
+        </button>
+      </div>
+
+      {!serverOnline && (
+        <div className="warn-box mb16">
+          Для синхронізації запусти сервер у терміналі:<br/>
+          <code>cd scripts &amp;&amp; python server.py</code><br/><br/>
+          Або відредагуй <code>scripts/.env</code> вручну.
+        </div>
+      )}
+
+      <div className="sources-grid">
+
+        {/* ── Telegram ── */}
+        <div className={`source-card ${channels.filter(c=>c.trim()).length ? "active" : ""}`}>
+          <div className="source-header">
+            <span className="source-icon">📱</span>
+            <div className="source-info">
+              <div className="source-name">Telegram канали</div>
+              <div className="source-meta">{channels.filter(c=>c.trim()).length} каналів додано</div>
+            </div>
+            <span className={`source-status ${channels.filter(c=>c.trim()).length ? "ok" : "off"}`}>
+              {channels.filter(c=>c.trim()).length ? "✓ Активно" : "Не налаштовано"}
+            </span>
+          </div>
+
+          <div className="source-body">
+            <label className="field-label">Режим</label>
+            <div className="radio-group">
+              <label className="radio-label">
+                <input type="radio" name="tg" value="public" checked={tgMode==="public"} onChange={() => setTgMode("public")}/>
+                <span>Тільки публічні <span className="badge-green">Рекомендовано</span></span>
+              </label>
+              <label className="radio-label">
+                <input type="radio" name="tg" value="public_private" checked={tgMode==="public_private"} onChange={() => setTgMode("public_private")}/>
+                <span>Публічні + Приватні</span>
+              </label>
+            </div>
+
+            {tgMode === "public_private" && (
+              <div className="grid2 mt8">
+                <div className="field">
+                  <label className="field-label">API ID — <a href="https://my.telegram.org" target="_blank" rel="noreferrer" className="link-btn">отримати →</a></label>
+                  <input className="input" type="password" value={apiKeys.telegram_api_id} onChange={e => setApiKeys(k=>({...k,telegram_api_id:e.target.value}))} placeholder="12345678"/>
+                </div>
+                <div className="field">
+                  <label className="field-label">API Hash {settings.has_telegram_api && <span className="badge-green ml4">✓</span>}</label>
+                  <input className="input" type="password" value={apiKeys.telegram_api_hash} onChange={e => setApiKeys(k=>({...k,telegram_api_hash:e.target.value}))} placeholder="abc123..."/>
+                </div>
+              </div>
+            )}
+
+            <label className="field-label mt8">Канали постачальників</label>
+            <div className="channel-list">
+              {channels.map((ch, i) => (
+                <div key={i} className="channel-row">
+                  <input className="channel-input" value={ch} onChange={e => setChannel(i, e.target.value)}
+                    placeholder="@назва_каналу або https://t.me/назва"/>
+                  {channels.length > 1 && <button className="btn-remove-ch" onClick={() => removeChannel(i)}>✕</button>}
+                </div>
+              ))}
+              <button className="btn-add-channel" onClick={addChannel}>+ Додати канал</button>
+            </div>
+
+            <div className="source-actions">
+              <button className="btn-sync" disabled={!serverOnline || syncing.telegram || !channels.filter(c=>c.trim()).length}
+                onClick={() => sync("telegram")}>
+                {syncing.telegram ? "⏳ Синхронізую..." : "🔄 Синхронізувати"}
+              </button>
+            </div>
+
+            {logs.telegram?.length > 0 && (
+              <div className="sync-log">{logs.telegram.map((l,i) => <div key={i}>{l}</div>)}</div>
+            )}
+          </div>
+        </div>
+
+        {/* ── CRM картки ── */}
+        {CRM_TYPES.map(crm => (
+          <div key={crm.id} className={`source-card ${hasKey[crm.id] ? "active" : ""}`}>
+            <div className="source-header">
+              <span className="source-icon">{crm.icon}</span>
+              <div className="source-info">
+                <div className="source-name">{crm.name}</div>
+                <div className="source-meta"><a href={crm.link} target="_blank" rel="noreferrer" className="link-btn">{crm.link.replace("https://","")}</a></div>
+              </div>
+              <span className={`source-status ${hasKey[crm.id] ? "ok" : "off"}`}>
+                {hasKey[crm.id] ? "✓ Підключено" : "Не підключено"}
+              </span>
+            </div>
+
+            <div className="source-body">
+              <div className="field">
+                <label className="field-label">{crm.label} <span className="hint-inline">({crm.hint})</span></label>
+                <input className="input" type="password" value={apiKeys[crm.field]||""}
+                  onChange={e => setApiKeys(k=>({...k,[crm.field]:e.target.value}))}
+                  placeholder={hasKey[crm.id] ? "••••••• (збережено)" : crm.placeholder}/>
+              </div>
+
+              <div className="source-actions">
+                <button className="btn-sync" disabled={!serverOnline || syncing[crm.id] || !hasKey[crm.id]}
+                  onClick={() => sync(crm.id)}>
+                  {syncing[crm.id] ? "⏳ Синхронізую..." : "🔄 Синхронізувати"}
+                </button>
+                {!hasKey[crm.id] && <span style={{fontSize:12,color:"#aaa",alignSelf:"center"}}>Спочатку збережи ключ</span>}
+              </div>
+
+              {logs[crm.id]?.length > 0 && (
+                <div className="sync-log">{logs[crm.id].map((l,i) => <div key={i}>{l}</div>)}</div>
+              )}
+            </div>
+          </div>
+        ))}
+
+      </div>
+
+      <div className="info-box mt16" style={{fontSize:12}}>
+        💡 Всі ключі зберігаються локально у <code>scripts/.env</code> — тільки на твоєму комп'ютері, нікуди не передаються.
+      </div>
+    </div>
+  );
+}

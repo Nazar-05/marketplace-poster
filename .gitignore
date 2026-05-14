@@ -1,0 +1,19 @@
+# ── Залежності ───────────────────────────────────────────
+node_modules/
+scripts/venv/
+scripts/__pycache__/
+*.pyc
+
+# ── Секретні файли (НЕ пушити!) ──────────────────────────
+scripts/.env
+scripts/settings.json
+
+# ── Локальні дані ─────────────────────────────────────────
+scripts/photos/
+scripts/*.session
+public/synced_products.json
+
+# ── Build ─────────────────────────────────────────────────
+build/
+.DS_Store
+Thumbs.db
