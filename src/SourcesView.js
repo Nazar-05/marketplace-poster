@@ -3,8 +3,8 @@ import { useState, useEffect } from "react";
 const SERVER = "http://localhost:5001";
 
 const CRM_TYPES = [
-  { id:"mydrop", name:"MyDrop", logo:"https://logo.clearbit.com/mydrop.com.ua", field:"mydrop_token", label:"API Токен", hint:"MyDrop → Інтеграції → API", placeholder:"Вставте токен...", link:"https://mydrop.com.ua" },
-  { id:"keycrm", name:"KeyCRM", logo:"https://logo.clearbit.com/keycrm.app",   field:"keycrm_key",  label:"API Ключ",  hint:"KeyCRM → Налаштування → API", placeholder:"Вставте ключ...",  link:"https://keycrm.app" },
+  { id:"mydrop", name:"MyDrop", logo:"https://www.google.com/s2/favicons?domain=mydrop.com.ua&sz=64", field:"mydrop_token", label:"API Токен", hint:"MyDrop → Інтеграції → API", placeholder:"Вставте токен...", link:"https://mydrop.com.ua" },
+  { id:"keycrm", name:"KeyCRM", logo:"https://www.google.com/s2/favicons?domain=keycrm.app&sz=64",   field:"keycrm_key",  label:"API Ключ",  hint:"KeyCRM → Налаштування → API", placeholder:"Вставте ключ...",  link:"https://keycrm.app" },
 ];
 
 export default function SourcesView({ serverOnline, onProductsLoaded }) {
@@ -94,7 +94,7 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
         <div className={`source-card ${channels.filter(c=>c.trim()).length ? "active" : ""}`}>
           <div className="source-header">
             <span className="source-icon">
-              <img src="https://logo.clearbit.com/telegram.org" alt="Telegram" className="source-logo"
+              <img src="https://www.google.com/s2/favicons?domain=telegram.org&sz=64" alt="Telegram" className="source-logo"
                 onError={e=>{e.target.style.display="none"; e.target.parentElement.innerHTML="📱";}}/>
             </span>
             <div className="source-info">
@@ -166,12 +166,10 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
                   onError={e=>{e.target.style.display="none";}}/>
               </span>
               <div className="source-info">
-                <div className="source-name">{crm.name}</div>
-                <div className="source-meta">
-                  <a href={crm.link} target="_blank" rel="noreferrer" className="link-btn">
-                    {crm.link.replace("https://","")}
-                  </a>
+                <div className="source-name">
+                  <a href={crm.link} target="_blank" rel="noreferrer" style={{textDecoration:"none",color:"inherit",fontWeight:600}}>{crm.name}</a>
                 </div>
+                
               </div>
               <span className={`source-status ${hasKey[crm.id] ? "ok" : "off"}`}>
                 {hasKey[crm.id] ? "✓ Підключено" : "Не підключено"}

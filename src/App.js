@@ -6,12 +6,12 @@ import SourcesView from "./SourcesView";
 const SERVER = "http://localhost:5001";
 
 const MARKETPLACES = [
-  { id:"rozetka", name:"Rozetka",     color:"#00a046", method:"REST API", photoReq:"1280×1280, білий фон" },
-  { id:"prom",    name:"Prom / Bigl", color:"#f36d21", method:"XML",      photoReq:"мін 1280×1280, до 10 фото" },
-  { id:"shafa",   name:"Shafa.ua",    color:"#e91e8c", method:"→ Prom",   photoReq:"квадратні фото, без фільтрів" },
-  { id:"kasta",   name:"Kasta",       color:"#6c2d91", method:"Excel",    photoReq:"фото на моделі або манекені" },
-  { id:"olx",     name:"OLX",         color:"#002f34", method:"OAuth API",photoReq:"до 15 фото, мін 640×480" },
-  { id:"mono",    name:"Mono базар",  color:"#aaa",    method:"Закритий", disabled:true },
+  { id:"rozetka", name:"Rozetka",     link:"https://rozetka.com.ua",  logo:"https://www.google.com/s2/favicons?domain=rozetka.com.ua&sz=64", color:"#00a046", method:"REST API", photoReq:"1280×1280, білий фон" },
+  { id:"prom",    name:"Prom / Bigl", link:"https://prom.ua",          logo:"https://www.google.com/s2/favicons?domain=prom.ua&sz=64",        color:"#f36d21", method:"XML",      photoReq:"мін 1280×1280, до 10 фото" },
+  { id:"shafa",   name:"Shafa.ua",    link:"https://shafa.ua",          logo:"https://www.google.com/s2/favicons?domain=shafa.ua&sz=64",       color:"#e91e8c", method:"→ Prom",   photoReq:"квадратні фото, без фільтрів" },
+  { id:"kasta",   name:"Kasta",       link:"https://kasta.ua",          logo:"https://www.google.com/s2/favicons?domain=kasta.ua&sz=64",       color:"#6c2d91", method:"Excel",    photoReq:"фото на моделі або манекені" },
+  { id:"olx",     name:"OLX",         link:"https://olx.ua",            logo:"https://www.google.com/s2/favicons?domain=olx.ua&sz=64",         color:"#002f34", method:"OAuth API",photoReq:"до 15 фото, мін 640×480" },
+  { id:"mono",    name:"Mono базар",  link:"https://monobank.ua",       logo:"https://www.google.com/s2/favicons?domain=monobank.ua&sz=64",    color:"#aaa",    method:"Закритий", disabled:true },
 ];
 
 const SOURCE_LABELS = { telegram:"Telegram", mydrop:"MyDrop", keycrm:"KeyCRM", manual:"Вручну" };
@@ -336,7 +336,9 @@ function SettingsView({ serverOnline }) {
       {!serverOnline && <div className="warn-box mb16">Для збереження налаштувань запусти:<br/><code>python scripts/server.py</code><br/><br/>Або відредагуй файл <code>scripts/.env</code> вручну.</div>}
 
       <div className="settings-section">
-        <h3 className="settings-title">📱 Telegram</h3>
+        <h3 className="settings-title">
+  <img src="https://www.google.com/s2/favicons?domain=telegram.org&sz=64" alt="Telegram" className="source-logo" style={{verticalAlign:"middle",marginRight:8}}/>
+  Telegram</h3>
         <label className="filter-label">Режим каналів</label>
         <div className="radio-group">
           <label className="radio-label">
@@ -369,7 +371,9 @@ function SettingsView({ serverOnline }) {
       </div>
 
       <div className="settings-section">
-        <h3 className="settings-title">🗂 MyDrop {status?.has_mydrop_token&&<span className="badge-green" style={{fontSize:11}}>✓ Збережено</span>}</h3>
+        <h3 className="settings-title">
+  <img src="https://www.google.com/s2/favicons?domain=mydrop.com.ua&sz=64" alt="MyDrop" className="source-logo" style={{verticalAlign:"middle",marginRight:8}}/>
+  <a href="https://mydrop.com.ua" target="_blank" rel="noreferrer" style={{textDecoration:"none",color:"inherit",fontWeight:600}}>MyDrop</a> {status?.has_mydrop_token&&<span className="badge-green" style={{fontSize:11}}>✓ Збережено</span>}</h3>
         <div className="field">
           <label className="field-label">API Токен <span className="hint-inline">(MyDrop → Інтеграції → API)</span></label>
           <input className="input" type="password" value={form.mydrop_token} onChange={e=>set("mydrop_token",e.target.value)} placeholder="Вставте токен..."/>
@@ -377,7 +381,9 @@ function SettingsView({ serverOnline }) {
       </div>
 
       <div className="settings-section">
-        <h3 className="settings-title">🗂 KeyCRM {status?.has_keycrm_key&&<span className="badge-green" style={{fontSize:11}}>✓ Збережено</span>}</h3>
+        <h3 className="settings-title">
+  <img src="https://www.google.com/s2/favicons?domain=keycrm.app&sz=64" alt="KeyCRM" className="source-logo" style={{verticalAlign:"middle",marginRight:8}}/>
+  <a href="https://keycrm.app" target="_blank" rel="noreferrer" style={{textDecoration:"none",color:"inherit",fontWeight:600}}>KeyCRM</a> {status?.has_keycrm_key&&<span className="badge-green" style={{fontSize:11}}>✓ Збережено</span>}</h3>
         <div className="field">
           <label className="field-label">API Ключ <span className="hint-inline">(KeyCRM → Налаштування → API)</span></label>
           <input className="input" type="password" value={form.keycrm_key} onChange={e=>set("keycrm_key",e.target.value)} placeholder="Вставте ключ..."/>
@@ -478,7 +484,7 @@ export default function App() {
             <span className="stat-badge stat-markets">{activeCount} маркетплейсів</span>
           </div>
           <div className={`server-badge ${serverOnline?"online":"offline"}`}>
-            {serverOnline?"🟢 Сервер":"🔴 Сервер вимкнено"}
+            {serverOnline?"🟢 Сервер працює":"🔴 Сервер вимкнено"}
           </div>
         </div>
       </header>
@@ -520,7 +526,7 @@ export default function App() {
       {view==="sources" && <SourcesView serverOnline={serverOnline} onProductsLoaded={()=>setPubV(v=>v+1)}/>}
       {view==="markets" && (
         <div className="card">
-          <h2>Маркетплейси</h2>
+          <h2>🛒 Маркетплейси</h2>
           <p className="hint">Увімкни потрібні — налаштування зберігаються автоматично.</p>
           <div className="market-list">
             {MARKETPLACES.map(m=>(
@@ -530,7 +536,8 @@ export default function App() {
                     onClick={()=>{if(!m.disabled){const n={...enabled,[m.id]:!enabled[m.id]};setEnabled(n);saveEnabledMkts(n);}}}>
                     <div className="toggle-knob" style={{left:enabled[m.id]&&!m.disabled?23:3}}/>
                   </div>
-                  <span className="market-name">{m.name}</span>
+                  <img src={m.logo} alt={m.name} className="source-logo" style={{verticalAlign:"middle",marginRight:6}} onError={e=>e.target.style.display="none"}/>
+                  <a href={m.link} target="_blank" rel="noreferrer" className="market-name" style={{textDecoration:"none",color:"inherit"}}>{m.name}</a>
                   <span className="market-method">{m.method}</span>
                 </div>
                 {m.photoReq&&!m.disabled&&<p className="photo-req">📸 {m.photoReq}</p>}
