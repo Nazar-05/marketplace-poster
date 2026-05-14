@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const SERVER = "http://localhost:5001";
 
@@ -6,6 +6,69 @@ const CRM_TYPES = [
   { id:"mydrop", name:"MyDrop", logo:"https://www.google.com/s2/favicons?domain=mydrop.com.ua&sz=64", field:"mydrop_token", label:"API Токен", hint:"MyDrop → Інтеграції → API", placeholder:"Вставте токен...", link:"https://mydrop.com.ua" },
   { id:"keycrm", name:"KeyCRM", logo:"https://www.google.com/s2/favicons?domain=keycrm.app&sz=64",   field:"keycrm_key",  label:"API Ключ",  hint:"KeyCRM → Налаштування → API", placeholder:"Вставте ключ...",  link:"https://keycrm.app" },
 ];
+
+const STATUS_LEGEND = [
+  { emoji:"✅", label:"Синхронізовано",       desc:"Товари успішно завантажені" },
+  { emoji:"❌", label:"Вимкнено",              desc:"Відключено вручну" },
+  { emoji:"⏳", label:"Очікує API",            desc:"Приватний канал — потрібен API ID + Hash" },
+  { emoji:"🛑", label:"Помилка синхронізації", desc:"Перевір API ключ або з'єднання" },
+  { emoji:"🔘", label:"Не синхронізовано",     desc:"Канал ще не перевірявся" },
+];
+
+function StatusLegendPopover() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handler(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position:"relative", display:"inline-flex" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        title="Що означають статуси?"
+        style={{
+          width:20, height:20, borderRadius:"50%",
+          border:"1.5px solid #bbb", background:"none",
+          cursor:"pointer", fontSize:11, fontWeight:700,
+          color:"#888", lineHeight:1, padding:0,
+          display:"flex", alignItems:"center", justifyContent:"center",
+          flexShrink:0,
+        }}
+      >?</button>
+
+      {open && (
+        <div style={{
+          position:"absolute", top:"calc(100% + 6px)", left:"50%",
+          transform:"translateX(-50%)",
+          background:"#fff", border:"1px solid #e5e7eb",
+          borderRadius:10, boxShadow:"0 4px 16px rgba(0,0,0,0.10)",
+          padding:"10px 14px", zIndex:999, minWidth:260,
+          fontSize:13, color:"#222",
+        }}>
+          <div style={{ fontWeight:600, marginBottom:8, color:"#555", fontSize:12 }}>
+            Статус каналу
+          </div>
+          {STATUS_LEGEND.map(({ emoji, label, desc }) => (
+            <div key={emoji} style={{ display:"flex", gap:8, alignItems:"flex-start", marginBottom:6 }}>
+              <span style={{ fontSize:15, flexShrink:0, lineHeight:"1.4" }}>{emoji}</span>
+              <span>
+                <span style={{ fontWeight:500 }}>{label}</span>
+                <span style={{ color:"#888", marginLeft:4 }}>— {desc}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function SourcesView({ serverOnline, onProductsLoaded }) {
   const [settings, setSettings] = useState({ telegram_mode:"public", telegram_channels:[], has_mydrop_token:false, has_keycrm_key:false, has_telegram_api:false });
@@ -19,7 +82,9 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
   const [disabledChannels, setDisabledChannels] = useState(() => {
     try { return JSON.parse(localStorage.getItem("mp_disabled_channels") || "[]"); } catch { return []; }
   });
-  const [channelStatus, setChannelStatus] = useState({});
+  const [channelStatus, setChannelStatus] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("mp_channel_status") || "{}"); } catch { return {}; }
+  });
 
   function toggleChannel(ch) {
     setDisabledChannels(prev => {
@@ -34,7 +99,15 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
     if (pendingPrivate.includes(ch))   return "⏳";
     if (channelStatus[ch] === "ok")    return "✅";
     if (channelStatus[ch] === "error") return "🛑";
-    return "—";
+    return "🔘";
+  }
+
+  function getChannelRowClass(ch) {
+    if (disabledChannels.includes(ch))      return "channel-row status-off";
+    if (pendingPrivate.includes(ch))        return "channel-row status-pending";
+    if (channelStatus[ch] === "ok")         return "channel-row status-ok";
+    if (channelStatus[ch] === "error")      return "channel-row status-error";
+    return "channel-row status-unknown";
   }
 
   useEffect(() => {
@@ -53,6 +126,10 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
       setChannels(d.telegram_channels?.length ? d.telegram_channels : [""]);
     }).catch(() => {});
   }, [serverOnline]);
+
+  useEffect(() => {
+    localStorage.setItem("mp_channel_status", JSON.stringify(channelStatus));
+  }, [channelStatus]);
 
   function addLog(source, msg) {
     setLogs(l => ({ ...l, [source]: [...(l[source] || []), msg] }));
@@ -93,10 +170,12 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
         addLog(source, `✅ Отримано: ${data.total} товарів`);
         addLog(source, `🆕 Нових: ${data.new_count}`);
         addLog(source, `🔁 Дублікатів пропущено: ${data.skipped}`);
-        if (source === "telegram") {
+        if (source === "telegram" && data.channel_results) {
           setChannelStatus(prev => {
             const next = {...prev};
-            channels.filter(c=>c.trim() && !disabledChannels.includes(c)).forEach(ch => { next[ch] = "ok"; });
+            Object.entries(data.channel_results).forEach(([ch, res]) => {
+              next[ch] = res.status;
+            });
             return next;
           });
         }
@@ -117,7 +196,10 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
   return (
     <div className="card">
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-        <h2 style={{ margin:0 }}>🔌 Джерела даних</h2>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <h2 style={{ margin:0 }}>🔌 Джерела даних</h2>
+          <StatusLegendPopover />
+        </div>
         <button className="btn-primary" onClick={save} disabled={!serverOnline} style={{ fontSize:13, padding:"8px 16px" }}>
           {saved ? "✓ Збережено!" : "💾 Зберегти"}
         </button>
@@ -178,7 +260,7 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
             <label className="field-label mt8">Канали постачальників</label>
             <div className="channel-list">
               {channels.map((ch, i) => (
-                <div key={i} className="channel-row">
+                <div key={i} className={getChannelRowClass(ch)}>
                   <span style={{fontSize:14,minWidth:20,textAlign:"center"}} title={
                     disabledChannels.includes(ch) ? "Вимкнено" :
                     pendingPrivate.includes(ch)   ? "Очікує API" :
@@ -225,7 +307,6 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
                 <div className="source-name">
                   <a href={crm.link} target="_blank" rel="noreferrer" style={{textDecoration:"none",color:"inherit",fontWeight:600}}>{crm.name}</a>
                 </div>
-                
               </div>
               <span className={`source-status ${hasKey[crm.id] ? "ok" : "off"}`}>
                 {hasKey[crm.id] ? "✓ Підключено" : "Не підключено"}

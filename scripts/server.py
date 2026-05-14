@@ -8,6 +8,7 @@
 """
 
 import re, json, os, uuid, requests
+from datetime import datetime, timezone
 from pathlib import Path
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
@@ -17,8 +18,16 @@ from dotenv import load_dotenv
 ENV_PATH = Path(__file__).parent / ".env"
 load_dotenv(ENV_PATH)
 
+import logging
+
+logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
 app        = Flask(__name__)
 CORS(app)
+
+logging.getLogger("werkzeug").addFilter(
+    type("_", (logging.Filter,), {"filter": lambda self, r: "/health" not in r.getMessage()})()
+)
 PHOTOS_DIR = Path(__file__).parent / "photos"
 PHOTOS_DIR.mkdir(exist_ok=True)
 
@@ -254,6 +263,16 @@ def update_settings():
 def health():
     return jsonify({"status":"ok"})
 
+@app.route("/synced-products")
+def get_synced_products():
+    products_file = Path(__file__).parent.parent / "public" / "synced_products.json"
+    if not products_file.exists():
+        return jsonify([])
+    try:
+        return jsonify(json.loads(products_file.read_text(encoding="utf-8")))
+    except:
+        return jsonify([])
+
 # ── Синхронізація джерел ──────────────────────────────────
 import sys, os
 sys.path.insert(0, str(Path(__file__).parent))
@@ -277,6 +296,7 @@ def sync_source(source: str) -> dict:
 
     new_products = []
 
+    channel_results = {}
     if source == "telegram":
         channels = [c.strip() for c in get_env("TELEGRAM_CHANNELS","").split(",") if c.strip()]
         for ch in channels:
@@ -297,18 +317,29 @@ def sync_source(source: str) -> dict:
                         pending_file.write_text(json.dumps(pending, ensure_ascii=False, indent=2), encoding="utf-8")
                     print(f"⚠️ {ch}: приватний канал, збережено для пізнішого додавання")
                     continue
-                resp = requests.get(f"https://t.me/s/{ch.lstrip('@')}", headers={"User-Agent":"Mozilla/5.0"}, timeout=10)
+                # Витягуємо username з повного URL якщо потрібно
+                if ch.startswith("https://t.me/"):
+                    ch_name = ch.replace("https://t.me/", "").strip("/")
+                else:
+                    ch_name = ch.lstrip("@")
+                resp = requests.get(f"https://t.me/s/{ch_name}", headers={"User-Agent":"Mozilla/5.0"}, timeout=10)
                 post_urls = re.findall(r'href="(https://t\.me/[^"]+/\d+)"', resp.text)
-                post_urls = list(dict.fromkeys(post_urls))[:20]
+                post_urls = list(dict.fromkeys(post_urls))[:50]
+                ch_count = 0
+                DATE_FROM = datetime(2026, 1, 1, tzinfo=timezone.utc)
                 for purl in post_urls:
                     p = fetch_telegram(purl)
                     if not p.get("error") and p.get("name"):
                         p["id"] = f"tg_{purl.split('/')[-1]}_{ch}"
                         p["supplier"] = ch
-                        p["addedAt"] = p.get("addedAt", "")
-                        new_products.append(p)
+                        p["addedAt"] = datetime.now(timezone.utc).isoformat()
+                        if datetime.fromisoformat(p["addedAt"]) >= DATE_FROM:
+                            new_products.append(p)
+                            ch_count += 1
+                channel_results[ch] = {"status": "ok", "count": ch_count}
             except Exception as e:
                 print(f"⚠️ {ch}: {e}")
+                channel_results[ch] = {"status": "error", "message": str(e)}
 
     elif source == "mydrop":
         token = get_env("MYDROP_TOKEN")
@@ -364,7 +395,7 @@ def sync_source(source: str) -> dict:
     merged = existing + truly_new
     products_file.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    return {"total": len(new_products), "new_count": len(truly_new), "skipped": len(new_products)-len(truly_new)}
+    return {"total": len(new_products), "new_count": len(truly_new), "skipped": len(new_products)-len(truly_new), "channel_results": channel_results if source == "telegram" else {}}
 
 @app.route("/pending-private-channels", methods=["GET"])
 def get_pending_private():
@@ -388,8 +419,30 @@ def sync_route(source):
     if "error" in result: return jsonify(result), 400
     return jsonify(result)
 
+import logging
+
+log = logging.getLogger("werkzeug")
+log.setLevel(logging.ERROR)
+
 if __name__ == "__main__":
     print("🚀 Сервер запущено на http://localhost:5001")
     print(f"   Фото зберігаються в: {PHOTOS_DIR}")
     print("   Залиш це вікно відкритим поки працюєш з додатком.\n")
+    print("✅ Сервер активний. Для зупинки натисни CTRL+C\n")
+    import threading
+
+    def auto_sync_loop():
+        import time
+        INTERVAL = 30 * 60  # 30 хвилин
+        print("🤖 Автосинк запущено — кожні 30 хвилин\n")
+        while True:
+            print("🔄 Автосинк: синхронізую Telegram...")
+            try:
+                result = sync_source("telegram")
+                print(f"✅ Автосинк: нових {result.get('new_count',0)} | дублів {result.get('skipped',0)}")
+            except Exception as e:
+                print(f"❌ Автосинк помилка: {e}")
+            time.sleep(INTERVAL)
+
+    threading.Thread(target=auto_sync_loop, daemon=True).start()
     app.run(host="127.0.0.1", port=5001, debug=False)

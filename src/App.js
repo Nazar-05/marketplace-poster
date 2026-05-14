@@ -425,7 +425,7 @@ export default function App() {
   useEffect(()=>{
     Promise.all([
       fetch("/products.json").then(r=>r.json()).catch(()=>[]),
-      fetch("/synced_products.json").then(r=>r.json()).catch(()=>[]),
+      fetch(`${SERVER}/synced-products`).then(r=>r.json()).catch(()=>[]),
     ]).then(([base, synced]) => {
       const manual = getManual();
       const all = [...base, ...synced, ...manual];
