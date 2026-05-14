@@ -14,7 +14,36 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
   const [tgMode, setTgMode]     = useState("public");
   const [syncing, setSyncing]   = useState({});
   const [logs, setLogs]         = useState({});
-  const [saved, setSaved]       = useState(false);
+  const [saved, setSaved]             = useState(false);
+  const [pendingPrivate, setPendingPrivate] = useState([]);
+  const [disabledChannels, setDisabledChannels] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("mp_disabled_channels") || "[]"); } catch { return []; }
+  });
+  const [channelStatus, setChannelStatus] = useState({});
+
+  function toggleChannel(ch) {
+    setDisabledChannels(prev => {
+      const next = prev.includes(ch) ? prev.filter(c => c !== ch) : [...prev, ch];
+      localStorage.setItem("mp_disabled_channels", JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function getChannelStatus(ch) {
+    if (disabledChannels.includes(ch)) return "❌";
+    if (pendingPrivate.includes(ch))   return "⏳";
+    if (channelStatus[ch] === "ok")    return "✅";
+    if (channelStatus[ch] === "error") return "🛑";
+    return "—";
+  }
+
+  useEffect(() => {
+    if (!serverOnline) return;
+    fetch(`${SERVER}/pending-private-channels`)
+      .then(r => r.json())
+      .then(d => setPendingPrivate(d || []))
+      .catch(() => {});
+  }, [serverOnline]);
 
   useEffect(() => {
     if (!serverOnline) return;
@@ -52,11 +81,25 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
       const res  = await fetch(`${SERVER}/sync/${source}`, { method: "POST" });
       const data = await res.json();
       if (data.error) {
-        addLog(source, `❌ ${data.error}`);
+        addLog(source, `🛑 ${data.error}`);
+        if (source === "telegram") {
+          setChannelStatus(prev => {
+            const next = {...prev};
+            channels.filter(c=>c.trim()).forEach(ch => { next[ch] = "error"; });
+            return next;
+          });
+        }
       } else {
         addLog(source, `✅ Отримано: ${data.total} товарів`);
         addLog(source, `🆕 Нових: ${data.new_count}`);
         addLog(source, `🔁 Дублікатів пропущено: ${data.skipped}`);
+        if (source === "telegram") {
+          setChannelStatus(prev => {
+            const next = {...prev};
+            channels.filter(c=>c.trim() && !disabledChannels.includes(c)).forEach(ch => { next[ch] = "ok"; });
+            return next;
+          });
+        }
         if (onProductsLoaded) onProductsLoaded();
       }
     } catch {
@@ -136,8 +179,21 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
             <div className="channel-list">
               {channels.map((ch, i) => (
                 <div key={i} className="channel-row">
+                  <span style={{fontSize:14,minWidth:20,textAlign:"center"}} title={
+                    disabledChannels.includes(ch) ? "Вимкнено" :
+                    pendingPrivate.includes(ch)   ? "Очікує API" :
+                    channelStatus[ch] === "ok"    ? "Синхронізовано" :
+                    channelStatus[ch] === "error" ? "Помилка синхронізації" : ""
+                  }>{getChannelStatus(ch)}</span>
                   <input className="channel-input" value={ch} onChange={e => setChannel(i, e.target.value)}
-                    placeholder="@назва_каналу або https://t.me/назва"/>
+                    placeholder="@назва_каналу або https://t.me/назва"
+                    style={{opacity: disabledChannels.includes(ch) ? 0.4 : 1}}/>
+                  <button
+                    title={disabledChannels.includes(ch) ? "Увімкнути канал" : "Вимкнути канал"}
+                    style={{background:"none",border:"none",cursor:"pointer",fontSize:14,opacity:0.6,padding:"0 2px"}}
+                    onClick={() => toggleChannel(ch)}>
+                    {disabledChannels.includes(ch) ? "▶" : "⏸"}
+                  </button>
                   {channels.length > 1 && <button className="btn-remove-ch" onClick={() => removeChannel(i)}>✕</button>}
                 </div>
               ))}
@@ -200,6 +256,25 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
         ))}
 
       </div>
+
+      {pendingPrivate.length > 0 && (
+        <div className="info-box mt16" style={{borderLeft:"3px solid #f59e0b",background:"#fffbeb"}}>
+          <div style={{fontWeight:600,marginBottom:8}}>⏳ Приватні канали очікують підключення API</div>
+          {pendingPrivate.map((ch, i) => (
+            <div key={i} style={{fontSize:13,padding:"4px 0",color:"#92400e"}}>{ch}</div>
+          ))}
+          <p style={{fontSize:12,color:"#aaa",marginTop:8}}>
+            Переключи режим на <b>Публічні + Приватні</b>, введи API ключі — і ці канали запрацюють автоматично.
+          </p>
+          <button style={{fontSize:12,color:"#aaa",background:"none",border:"none",cursor:"pointer",marginTop:4}}
+            onClick={() => {
+              fetch(`${SERVER}/pending-private-channels/clear`, {method:"POST"});
+              setPendingPrivate([]);
+            }}>
+            🗑 Очистити список
+          </button>
+        </div>
+      )}
 
       <div className="info-box mt16" style={{fontSize:12}}>
         💡 Всі ключі зберігаються локально у <code>scripts/.env</code> — тільки на твоєму комп'ютері.

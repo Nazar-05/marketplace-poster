@@ -9,9 +9,9 @@ const MARKETPLACES = [
   { id:"rozetka", name:"Rozetka",     link:"https://rozetka.com.ua",  logo:"https://www.google.com/s2/favicons?domain=rozetka.com.ua&sz=64", color:"#00a046", method:"REST API", photoReq:"1280×1280, білий фон" },
   { id:"prom",    name:"Prom / Bigl", link:"https://prom.ua",          logo:"https://www.google.com/s2/favicons?domain=prom.ua&sz=64",        color:"#f36d21", method:"XML",      photoReq:"мін 1280×1280, до 10 фото" },
   { id:"shafa",   name:"Shafa.ua",    link:"https://shafa.ua",          logo:"https://www.google.com/s2/favicons?domain=shafa.ua&sz=64",       color:"#e91e8c", method:"→ Prom",   photoReq:"квадратні фото, без фільтрів" },
-  { id:"kasta",   name:"Kasta",       link:"https://kasta.ua",          logo:"https://www.google.com/s2/favicons?domain=kasta.ua&sz=64",       color:"#6c2d91", method:"Excel",    photoReq:"фото на моделі або манекені" },
-  { id:"olx",     name:"OLX",         link:"https://olx.ua",            logo:"https://www.google.com/s2/favicons?domain=olx.ua&sz=64",         color:"#002f34", method:"OAuth API",photoReq:"до 15 фото, мін 640×480" },
-  { id:"mono",    name:"Mono базар",  link:"https://monobank.ua",       logo:"https://www.google.com/s2/favicons?domain=monobank.ua&sz=64",    color:"#aaa",    method:"Закритий", disabled:true },
+  { id:"kasta",   name:"Kasta",       link:"https://kasta.ua",          logo:"https://www.google.com/s2/favicons?domain=kasta.ua&sz=64",       color:"#FF5000", method:"Excel",    photoReq:"фото на моделі або манекені" },
+  { id:"olx",     name:"OLX",         link:"https://olx.ua",            logo:"https://www.google.com/s2/favicons?domain=olx.ua&sz=64",         color:"#5C307F", method:"OAuth API",photoReq:"до 15 фото, мін 640×480" },
+  { id:"mono",    name:"Mono базар",  link:"https://monobank.ua",       logo:"https://www.google.com/s2/favicons?domain=monobank.ua&sz=64",    color:"#1A1A1A", method:"Закритий", disabled:true },
 ];
 
 const SOURCE_LABELS = { telegram:"Telegram", mydrop:"MyDrop", keycrm:"KeyCRM", manual:"Вручну" };
@@ -515,7 +515,7 @@ export default function App() {
             </div>
             {activeCount===0&&<div className="info-box mb12">⚠️ Жоден маркетплейс не увімкнений. <button className="link-btn" onClick={()=>setView("markets")}>Перейти →</button></div>}
             {filtered.length===0
-              ?<div className="empty-state">😕 Товарів не знайдено.<br/><button className="link-btn" onClick={()=>setShowAdd(true)}>Додайте перший товар →</button></div>
+              ?<div className="empty-state">😕 Товарів не знайдено.<br/><button className="link-btn" onClick={()=>setView("sources")}>Додайте джерела даних →</button></div>
               :<div className="feed-grid">{filtered.map(p=><ProductCard key={p.id} product={p} selected={selected.has(p.id)} onSelect={toggleSelect} published={isPublished(p)}/>)}</div>
             }
           </div>

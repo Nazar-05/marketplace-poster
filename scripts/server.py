@@ -254,12 +254,6 @@ def update_settings():
 def health():
     return jsonify({"status":"ok"})
 
-if __name__ == "__main__":
-    print("🚀 Сервер запущено на http://localhost:5001")
-    print(f"   Фото зберігаються в: {PHOTOS_DIR}")
-    print("   Залиш це вікно відкритим поки працюєш з додатком.\n")
-    app.run(host="127.0.0.1", port=5001, debug=False)
-
 # ── Синхронізація джерел ──────────────────────────────────
 import sys, os
 sys.path.insert(0, str(Path(__file__).parent))
@@ -289,6 +283,20 @@ def sync_source(source: str) -> dict:
             url = f"https://t.me/{ch.lstrip('@')}" if not ch.startswith("http") else ch
             # Беремо останні 20 постів каналу
             try:
+                is_private_link = "joinchat" in ch or "/+" in ch
+                is_plain_text = not ch.startswith("http") and not ch.startswith("@") and not re.match(r'^[a-zA-Z0-9_]{5,}$', ch)
+                if is_private_link or is_plain_text:
+                    # Зберігаємо в pending_private_channels.json
+                    pending_file = Path(__file__).parent / "pending_private_channels.json"
+                    pending = []
+                    if pending_file.exists():
+                        try: pending = json.loads(pending_file.read_text(encoding="utf-8"))
+                        except: pending = []
+                    if ch not in pending:
+                        pending.append(ch)
+                        pending_file.write_text(json.dumps(pending, ensure_ascii=False, indent=2), encoding="utf-8")
+                    print(f"⚠️ {ch}: приватний канал, збережено для пізнішого додавання")
+                    continue
                 resp = requests.get(f"https://t.me/s/{ch.lstrip('@')}", headers={"User-Agent":"Mozilla/5.0"}, timeout=10)
                 post_urls = re.findall(r'href="(https://t\.me/[^"]+/\d+)"', resp.text)
                 post_urls = list(dict.fromkeys(post_urls))[:20]
@@ -358,6 +366,20 @@ def sync_source(source: str) -> dict:
 
     return {"total": len(new_products), "new_count": len(truly_new), "skipped": len(new_products)-len(truly_new)}
 
+@app.route("/pending-private-channels", methods=["GET"])
+def get_pending_private():
+    pending_file = Path(__file__).parent / "pending_private_channels.json"
+    if not pending_file.exists():
+        return jsonify([])
+    try: return jsonify(json.loads(pending_file.read_text(encoding="utf-8")))
+    except: return jsonify([])
+
+@app.route("/pending-private-channels/clear", methods=["POST"])
+def clear_pending_private():
+    pending_file = Path(__file__).parent / "pending_private_channels.json"
+    pending_file.write_text("[]", encoding="utf-8")
+    return jsonify({"ok": True})
+
 @app.route("/sync/<source>", methods=["POST"])
 def sync_route(source):
     if source not in ("telegram","mydrop","keycrm"):
@@ -365,3 +387,9 @@ def sync_route(source):
     result = sync_source(source)
     if "error" in result: return jsonify(result), 400
     return jsonify(result)
+
+if __name__ == "__main__":
+    print("🚀 Сервер запущено на http://localhost:5001")
+    print(f"   Фото зберігаються в: {PHOTOS_DIR}")
+    print("   Залиш це вікно відкритим поки працюєш з додатком.\n")
+    app.run(host="127.0.0.1", port=5001, debug=False)
