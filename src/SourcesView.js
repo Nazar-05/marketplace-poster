@@ -3,18 +3,18 @@ import { useState, useEffect } from "react";
 const SERVER = "http://localhost:5001";
 
 const CRM_TYPES = [
-  { id:"mydrop", name:"MyDrop",  icon:"🟠", field:"mydrop_token",  label:"API Токен", hint:"MyDrop → Інтеграції → API", placeholder:"Вставте токен...", link:"https://mydrop.com.ua" },
-  { id:"keycrm", name:"KeyCRM",  icon:"🟣", field:"keycrm_key",   label:"API Ключ",  hint:"KeyCRM → Налаштування → API", placeholder:"Вставте ключ...",  link:"https://keycrm.app" },
+  { id:"mydrop", name:"MyDrop", logo:"https://logo.clearbit.com/mydrop.com.ua", field:"mydrop_token", label:"API Токен", hint:"MyDrop → Інтеграції → API", placeholder:"Вставте токен...", link:"https://mydrop.com.ua" },
+  { id:"keycrm", name:"KeyCRM", logo:"https://logo.clearbit.com/keycrm.app",   field:"keycrm_key",  label:"API Ключ",  hint:"KeyCRM → Налаштування → API", placeholder:"Вставте ключ...",  link:"https://keycrm.app" },
 ];
 
 export default function SourcesView({ serverOnline, onProductsLoaded }) {
-  const [settings, setSettings]   = useState({ telegram_mode:"public", telegram_channels:[], has_mydrop_token:false, has_keycrm_key:false, has_telegram_api:false });
-  const [channels, setChannels]   = useState([""]);
-  const [apiKeys, setApiKeys]     = useState({ mydrop_token:"", keycrm_key:"", telegram_api_id:"", telegram_api_hash:"" });
-  const [tgMode, setTgMode]       = useState("public");
-  const [syncing, setSyncing]     = useState({});
-  const [logs, setLogs]           = useState({});
-  const [saved, setSaved]         = useState(false);
+  const [settings, setSettings] = useState({ telegram_mode:"public", telegram_channels:[], has_mydrop_token:false, has_keycrm_key:false, has_telegram_api:false });
+  const [channels, setChannels] = useState([""]);
+  const [apiKeys, setApiKeys]   = useState({ mydrop_token:"", keycrm_key:"", telegram_api_id:"", telegram_api_hash:"" });
+  const [tgMode, setTgMode]     = useState("public");
+  const [syncing, setSyncing]   = useState({});
+  const [logs, setLogs]         = useState({});
+  const [saved, setSaved]       = useState(false);
 
   useEffect(() => {
     if (!serverOnline) return;
@@ -29,7 +29,6 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
     setLogs(l => ({ ...l, [source]: [...(l[source] || []), msg] }));
   }
 
-  // ── Зберегти налаштування ──
   async function save() {
     if (!serverOnline) return;
     const chs = channels.filter(c => c.trim());
@@ -44,7 +43,6 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
     setTimeout(() => setSaved(false), 2500);
   }
 
-  // ── Синхронізація з джерелом ──
   async function sync(source) {
     if (!serverOnline) return;
     setSyncing(s => ({ ...s, [source]: true }));
@@ -67,11 +65,9 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
     setSyncing(s => ({ ...s, [source]: false }));
   }
 
-  function setChannel(i, val) {
-    const arr = [...channels]; arr[i] = val; setChannels(arr);
-  }
-  function addChannel()    { setChannels(c => [...c, ""]); }
-  function removeChannel(i){ setChannels(c => c.filter((_, idx) => idx !== i)); }
+  function setChannel(i, val) { const arr = [...channels]; arr[i] = val; setChannels(arr); }
+  function addChannel()       { setChannels(c => [...c, ""]); }
+  function removeChannel(i)   { setChannels(c => c.filter((_, idx) => idx !== i)); }
 
   const hasKey = { mydrop: settings.has_mydrop_token, keycrm: settings.has_keycrm_key };
 
@@ -86,8 +82,8 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
 
       {!serverOnline && (
         <div className="warn-box mb16">
-          Для синхронізації запусти сервер у терміналі:<br/>
-          <code>cd scripts &amp;&amp; python server.py</code><br/><br/>
+          Для синхронізації запусти сервер:<br/>
+          <code>cd scripts → python server.py</code><br/><br/>
           Або відредагуй <code>scripts/.env</code> вручну.
         </div>
       )}
@@ -97,7 +93,10 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
         {/* ── Telegram ── */}
         <div className={`source-card ${channels.filter(c=>c.trim()).length ? "active" : ""}`}>
           <div className="source-header">
-            <span className="source-icon">📱</span>
+            <span className="source-icon">
+              <img src="https://logo.clearbit.com/telegram.org" alt="Telegram" className="source-logo"
+                onError={e=>{e.target.style.display="none"; e.target.parentElement.innerHTML="📱";}}/>
+            </span>
             <div className="source-info">
               <div className="source-name">Telegram канали</div>
               <div className="source-meta">{channels.filter(c=>c.trim()).length} каналів додано</div>
@@ -162,10 +161,17 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
         {CRM_TYPES.map(crm => (
           <div key={crm.id} className={`source-card ${hasKey[crm.id] ? "active" : ""}`}>
             <div className="source-header">
-              <span className="source-icon">{crm.icon}</span>
+              <span className="source-icon">
+                <img src={crm.logo} alt={crm.name} className="source-logo"
+                  onError={e=>{e.target.style.display="none";}}/>
+              </span>
               <div className="source-info">
                 <div className="source-name">{crm.name}</div>
-                <div className="source-meta"><a href={crm.link} target="_blank" rel="noreferrer" className="link-btn">{crm.link.replace("https://","")}</a></div>
+                <div className="source-meta">
+                  <a href={crm.link} target="_blank" rel="noreferrer" className="link-btn">
+                    {crm.link.replace("https://","")}
+                  </a>
+                </div>
               </div>
               <span className={`source-status ${hasKey[crm.id] ? "ok" : "off"}`}>
                 {hasKey[crm.id] ? "✓ Підключено" : "Не підключено"}
@@ -198,7 +204,7 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
       </div>
 
       <div className="info-box mt16" style={{fontSize:12}}>
-        💡 Всі ключі зберігаються локально у <code>scripts/.env</code> — тільки на твоєму комп'ютері, нікуди не передаються.
+        💡 Всі ключі зберігаються локально у <code>scripts/.env</code> — тільки на твоєму комп'ютері.
       </div>
     </div>
   );
