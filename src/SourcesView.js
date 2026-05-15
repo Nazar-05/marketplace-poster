@@ -71,14 +71,26 @@ function StatusLegendPopover() {
   );
 }
 
-export default function SourcesView({ serverOnline, onProductsLoaded, onChannelToggle }) {
+export default function SourcesView({ serverOnline, onProductsLoaded, onChannelToggle, onDirtyChange }) {
   const [settings, setSettings] = useState({ telegram_mode:"public", telegram_channels:[], has_mydrop_token:false, has_keycrm_key:false, has_telegram_api:false });
   const [channels, setChannels] = useState([""]);
   const [apiKeys, setApiKeys]   = useState({ mydrop_token:"", keycrm_key:"", telegram_api_id:"", telegram_api_hash:"" });
   const [tgMode, setTgMode]     = useState("public");
   const [syncing, setSyncing]   = useState({});
   const [logs, setLogs]         = useState({});
-  const [saved, setSaved]             = useState(false);
+  const [saved, setSaved]   = useState(false);
+  const [dirty, setDirty]   = useState(false);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (dirty) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirty]);
   const [pendingPrivate, setPendingPrivate] = useState([]);
   const [disabledChannels, setDisabledChannels] = useState(() => {
     try { return JSON.parse(localStorage.getItem("mp_disabled_channels") || "[]"); } catch { return []; }
@@ -148,6 +160,8 @@ export default function SourcesView({ serverOnline, onProductsLoaded, onChannelT
     const fresh = await fetch(`${SERVER}/settings`).then(r => r.json());
     setSettings(fresh);
     setSaved(true);
+    setDirty(false);
+    onDirtyChange?.(false);
     setTimeout(() => setSaved(false), 2500);
   }
 
@@ -193,9 +207,9 @@ export default function SourcesView({ serverOnline, onProductsLoaded, onChannelT
     setSyncing(s => ({ ...s, [source]: false }));
   }
 
-  function setChannel(i, val) { const arr = [...channels]; arr[i] = val; setChannels(arr); }
-  function addChannel()       { setChannels(c => [...c, ""]); }
-  function removeChannel(i)   { setChannels(c => c.filter((_, idx) => idx !== i)); }
+  function setChannel(i, val) { const arr = [...channels]; arr[i] = val; setChannels(arr); setDirty(true); onDirtyChange?.(true); }
+  function addChannel()       { setChannels(c => [...c, ""]); setDirty(true); onDirtyChange?.(true); }
+  function removeChannel(i)   { setChannels(c => c.filter((_, idx) => idx !== i)); setDirty(true); onDirtyChange?.(true); }
 
   const hasKey = { mydrop: settings.has_mydrop_token, keycrm: settings.has_keycrm_key };
 
@@ -223,7 +237,7 @@ export default function SourcesView({ serverOnline, onProductsLoaded, onChannelT
           <h2 style={{ margin:0 }}>🔌 Джерела даних</h2>
           <StatusLegendPopover />
         </div>
-        <button className="btn-primary" onClick={save} disabled={!serverOnline} style={{ fontSize:13, padding:"8px 16px" }}>
+        <button className="btn-primary" onClick={save} disabled={!serverOnline || (!dirty && !saved)} style={{ fontSize:13, padding:"8px 16px", opacity: dirty ? 1 : 0.5 }}>
           {saved ? "✓ Збережено!" : "💾 Зберегти"}
         </button>
       </div>

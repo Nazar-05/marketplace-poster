@@ -195,10 +195,6 @@ function FiltersBar({ filters, setFilters, products }) {
       <input className="filter-input" type="date" value={filters.dateFrom} onChange={e=>set("dateFrom",e.target.value)}/>
       <label className="filter-label">Дата до</label>
       <input className="filter-input" type="date" value={filters.dateTo} onChange={e=>set("dateTo",e.target.value)}/>
-      <label className="filter-check">
-        <input type="checkbox" checked={filters.showPublished} onChange={e=>set("showPublished",e.target.checked)}/>
-        <span>Показати опубліковані</span>
-      </label>
       <button className="filter-reset" onClick={()=>setFilters(defaultFilters)}>Скинути фільтри</button>
     </div>
   );
@@ -527,6 +523,18 @@ function SettingsView({ serverOnline, onReset }) {
 // ════════ MAIN APP ════════
 export default function App() {
   const [view, setView]         = useState("feed");
+  const [sourceDirty, setSourceDirty] = useState(false);
+
+  function safeSetView(newView) {
+    if (sourceDirty && newView !== "sources") {
+      if (window.confirm("Є незбережені зміни. Покинути без збереження?")) {
+        setSourceDirty(false);
+        setView(newView);
+      }
+    } else {
+      setView(newView);
+    }
+  }
   const [allProducts, setAll]   = useState([]);
   const [filters, setFilters]   = useState(defaultFilters);
   const [selected, setSelected] = useState(new Set());
@@ -576,16 +584,27 @@ const filtered = useMemo(()=>allProducts.filter(p=>{
     if(filters.size     &&!p.size?.includes(filters.size)) return false;
     if(filters.priceMin &&+p.price<+filters.priceMin)      return false;
     if(filters.priceMax &&+p.price>+filters.priceMax)      return false;
-    if(filters.dateFrom &&p.addedAt<filters.dateFrom)      return false;
-    if(filters.dateTo   &&p.addedAt>filters.dateTo+"T23:59:59") return false;
+    const itemDate = p.post_date
+      ? p.post_date.split(".").reverse().join("-")
+      : (p.addedAt||"").slice(0,10);
+    if(filters.dateFrom && itemDate < filters.dateFrom) return false;
+    if(filters.dateTo   && itemDate > filters.dateTo)   return false;
     return true;
   }),[allProducts,filters,pubV,disabledChannels]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
     switch (sortOrder) {
-      case "newest":     return arr.sort((a,b) => (b.addedAt||"").localeCompare(a.addedAt||""));
-      case "oldest":     return arr.sort((a,b) => (a.addedAt||"").localeCompare(b.addedAt||""));
+      case "newest": return arr.sort((a,b) => {
+        const da = a.post_date ? a.post_date.split(".").reverse().join("-") : (a.addedAt||"").slice(0,10);
+        const db = b.post_date ? b.post_date.split(".").reverse().join("-") : (b.addedAt||"").slice(0,10);
+        return db.localeCompare(da);
+      });
+      case "oldest": return arr.sort((a,b) => {
+        const da = a.post_date ? a.post_date.split(".").reverse().join("-") : (a.addedAt||"").slice(0,10);
+        const db = b.post_date ? b.post_date.split(".").reverse().join("-") : (b.addedAt||"").slice(0,10);
+        return da.localeCompare(db);
+      });
       case "price_asc":  return arr.sort((a,b) => (+a.price||0) - (+b.price||0));
       case "price_desc": return arr.sort((a,b) => (+b.price||0) - (+a.price||0));
       default: return arr;
@@ -649,7 +668,7 @@ const filtered = useMemo(()=>allProducts.filter(p=>{
 
       <nav className="nav">
         {[["feed","📋 Стрічка"],["sources","🔌 Джерела"],["markets","🛒 Маркетплейси"],["result","📦 Результат"],["settings","⚙️ Налаштування"]].map(([v,l])=>(
-          <button key={v} className={`nav-btn ${view===v?"active":""}`} onClick={()=>setView(v)}>{l}</button>
+          <button key={v} className={`nav-btn ${view===v?"active":""}`} onClick={()=>safeSetView(v)}>{l}</button>
         ))}
       </nav>
 
@@ -664,9 +683,16 @@ const filtered = useMemo(()=>allProducts.filter(p=>{
                 <button className="btn-sm" onClick={clearSel}>Скинути</button>
                 <span className="sel-count">{selected.size>0?`Вибрано: ${selected.size}`:`${filtered.length} товарів`}</span>
                 <SortDropdown value={sortOrder} onChange={setSortOrder} />
+                <button
+                  className="btn-sm"
+                  style={filters.showPublished ? {background:"#4F46E5",color:"#fff",borderColor:"#4F46E5"} : {}}
+                  onClick={()=>setFilters(f=>({...f,showPublished:!f.showPublished}))}
+                >
+                  {filters.showPublished ? "Не опубліковані" : "Опубліковані"}
+                </button>
               </div>
               <div className="feed-toolbar-right">
-                <button className="btn-add" onClick={()=>setShowAdd(true)}>+ Додати товар</button>
+                {!filters.showPublished && <button className="btn-add" onClick={()=>setShowAdd(true)}>+ Додати товар</button>}
                 {filters.showPublished
                   ? <button className="btn-publish" style={{background:"#c0392b"}} disabled={selected.size===0} onClick={()=>{ clearPublished([...selected].map(id=>makeKey(allProducts.find(p=>p.id===id)))); setSelected(new Set()); setPubV(v=>v+1); setToast(`✓ Скинуто публікацію для ${selected.size} товарів`); }}>
                       Скинути публікації {selected.size>0?`(${selected.size})`:""} →
@@ -679,7 +705,12 @@ const filtered = useMemo(()=>allProducts.filter(p=>{
             </div>
             {activeCount===0&&<div className="info-box mb12">⚠️ Жоден маркетплейс не увімкнений. <button className="link-btn" onClick={()=>setView("markets")}>Перейти →</button></div>}
             {filtered.length===0
-              ?<div className="empty-state">😕 Товарів не знайдено.<br/><button className="link-btn" onClick={()=>setView("sources")}>Додайте джерела даних →</button></div>
+              ?<div className="empty-state">
+  {filters.showPublished
+    ? <>😕 Опублікованих товарів немає.<br/>Спочатку опублікуйте товари зі стрічки.</>
+    : <>😕 Товарів не знайдено.<br/><button className="link-btn" onClick={()=>setView("sources")}>Додайте джерела даних →</button></>
+  }
+</div>
               :<div className="feed-grid">{sorted.map(p=><ProductCard key={p.id} product={p} selected={selected.has(p.id)} onSelect={toggleSelect} published={isPublished(p)} onDelete={handleDelete} onView={setViewProduct}/>)}</div>
             }
           </div>
@@ -687,7 +718,7 @@ const filtered = useMemo(()=>allProducts.filter(p=>{
       )}
 
       {/* ── SOURCES ── */}
-      {view==="sources" && <SourcesView serverOnline={serverOnline} onProductsLoaded={()=>setPubV(v=>v+1)} onChannelToggle={()=>setDisabledChannels(JSON.parse(localStorage.getItem("mp_disabled_channels")||"[]"))}/>}
+      {view==="sources" && <SourcesView serverOnline={serverOnline} onProductsLoaded={()=>setPubV(v=>v+1)} onChannelToggle={()=>setDisabledChannels(JSON.parse(localStorage.getItem("mp_disabled_channels")||"[]"))} onDirtyChange={setSourceDirty}/>}
 
       {/* ── MARKETS ── */}
       {view==="markets" && (

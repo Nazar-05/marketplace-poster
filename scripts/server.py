@@ -369,8 +369,7 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                 all_post_urls = []
                 page_url = f"https://t.me/s/{ch_name}"
                 pages_fetched = 0
-                MAX_PAGES = 5
-                while page_url and pages_fetched < MAX_PAGES:
+                while page_url:
                     resp = requests.get(page_url, headers={"User-Agent":"Mozilla/5.0"}, timeout=10)
                     found = re.findall(r'href="(https://t\.me/[^"]+/\d+)"', resp.text)
                     all_post_urls.extend(found)
@@ -379,19 +378,30 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                         page_url = f"https://t.me/s/{ch_name}?before={prev_match.group(1)}"
                     else:
                         break
-                    pages_fetched += 1
                 post_urls = list(dict.fromkeys(all_post_urls))
                 ch_count = 0
                 DATE_FROM = datetime(2026, 1, 1, tzinfo=timezone.utc)
                 # Групуємо пости по альбому (grouped_id)
                 seen_ids = set()
+                stop_parsing = False
                 for purl in post_urls:
+                    if stop_parsing:
+                        break
                     post_id = purl.split('/')[-1]
                     if post_id in seen_ids:
                         continue
-                    # Збираємо всі фото з поста та сусідніх (альбом ±3)
                     p = fetch_telegram(purl)
-                    log(f"  пост {purl}: name={repr(p.get('name',''))[:30]} err={p.get('error','')[:50] if p.get('error') else ''}")
+                    if p.get('error'):
+                        log(f"  ⚠️ {purl}: {p.get('error','')[:80]}")
+                    # Зупиняємось якщо пост старший за DATE_FROM
+                    if p.get("post_date"):
+                        try:
+                            post_dt = datetime.strptime(p["post_date"], "%d.%m.%Y").replace(tzinfo=timezone.utc)
+                            if post_dt < DATE_FROM:
+                                stop_parsing = True
+                                break
+                        except:
+                            pass
                     if not p.get("error") and (p.get("name") or p.get("description")):
                         if not p.get("name") and p.get("description"):
                             first_line = p["description"].split("\n")[0].strip()
