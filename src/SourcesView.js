@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import SortDropdown from "./SortDropdown";
 
 const SERVER = "http://localhost:5001";
 
@@ -70,7 +71,7 @@ function StatusLegendPopover() {
   );
 }
 
-export default function SourcesView({ serverOnline, onProductsLoaded }) {
+export default function SourcesView({ serverOnline, onProductsLoaded, onChannelToggle }) {
   const [settings, setSettings] = useState({ telegram_mode:"public", telegram_channels:[], has_mydrop_token:false, has_keycrm_key:false, has_telegram_api:false });
   const [channels, setChannels] = useState([""]);
   const [apiKeys, setApiKeys]   = useState({ mydrop_token:"", keycrm_key:"", telegram_api_id:"", telegram_api_hash:"" });
@@ -90,6 +91,7 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
     setDisabledChannels(prev => {
       const next = prev.includes(ch) ? prev.filter(c => c !== ch) : [...prev, ch];
       localStorage.setItem("mp_disabled_channels", JSON.stringify(next));
+      if (onChannelToggle) onChannelToggle();
       return next;
     });
   }
@@ -193,6 +195,23 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
 
   const hasKey = { mydrop: settings.has_mydrop_token, keycrm: settings.has_keycrm_key };
 
+  const [allProducts, setAllProducts] = useState([]);
+  useEffect(() => {
+    Promise.all([
+      fetch("/products.json").then(r=>r.json()).catch(()=>[]),
+      fetch(`${SERVER}/synced-products`).then(r=>r.json()).catch(()=>[]),
+    ]).then(([base, synced]) => {
+      try {
+        const manual = JSON.parse(localStorage.getItem("mp_manual") || "[]");
+        setAllProducts([...base, ...synced, ...manual]);
+      } catch { setAllProducts([...base, ...synced]); }
+    });
+  }, []);
+
+  function getChannelCount(ch) {
+    return allProducts.filter(p => p.supplier === ch || p.source_channel === ch || p.channel === ch).length;
+  }
+
   return (
     <div className="card">
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
@@ -268,8 +287,12 @@ export default function SourcesView({ serverOnline, onProductsLoaded }) {
                     channelStatus[ch] === "error" ? "Помилка синхронізації" : ""
                   }>{getChannelStatus(ch)}</span>
                   <input className="channel-input" value={ch} onChange={e => setChannel(i, e.target.value)}
+                    title={ch && getChannelCount(ch) > 0 ? `${getChannelCount(ch)} товарів` : ""}
                     placeholder="@назва_каналу або https://t.me/назва"
                     style={{opacity: disabledChannels.includes(ch) ? 0.4 : 1}}/>
+                  {ch && getChannelCount(ch) > 0 && (
+                    <span style={{fontSize:11,color:"#888",whiteSpace:"nowrap",flexShrink:0}}>{getChannelCount(ch)} шт</span>
+                  )}
                   <button
                     title={disabledChannels.includes(ch) ? "Увімкнути канал" : "Вимкнути канал"}
                     style={{background:"none",border:"none",cursor:"pointer",fontSize:14,opacity:0.6,padding:"0 2px"}}

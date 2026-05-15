@@ -2,6 +2,12 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import "./App.css";
 import PhotoManager from "./PhotoManager";
 import SourcesView from "./SourcesView";
+import SortDropdown from "./SortDropdown";
+function decodeHtml(str) {
+  const txt = document.createElement("textarea");
+  txt.innerHTML = str;
+  return txt.value;
+}
 
 const SERVER = "http://localhost:5001";
 
@@ -256,7 +262,10 @@ function AddProductModal({ onClose, onAdd, serverOnline }) {
       const res = await fetch(`${SERVER}/fetch`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({url}) });
       const data = await res.json();
       if (data.error) { setError(data.error); }
-      else { setProduct({...emptyProduct, ...data, id:Date.now().toString(), addedAt:new Date().toISOString()}); setShowForm(true); }
+      else { const decoded = Object.fromEntries(
+  Object.entries(data).map(([k, v]) => [k, typeof v === "string" ? decodeHtml(v) : v])
+);
+setProduct({...emptyProduct, ...decoded, id:Date.now().toString(), addedAt:new Date().toISOString()}); setShowForm(true); }
     } catch(e) { setError("Сервер недоступний. Запусти: python scripts/server.py"); }
     setLoading(false);
   }
@@ -526,6 +535,9 @@ export default function App() {
   const [toast, setToast]       = useState("");
   const [viewProduct, setViewProduct] = useState(null);
   const [sortOrder, setSortOrder] = useState("newest");
+const [disabledChannels, setDisabledChannels] = useState(() => {
+  try { return JSON.parse(localStorage.getItem("mp_disabled_channels") || "[]"); } catch { return []; }
+});
 
   // Перевірка сервера
   useEffect(()=>{
@@ -547,7 +559,8 @@ export default function App() {
     });
   },[pubV]);
 
-  const filtered = useMemo(()=>allProducts.filter(p=>{
+const filtered = useMemo(()=>allProducts.filter(p=>{
+  if (disabledChannels.some(ch => ch && (p.supplier?.includes(ch) || p.source_channel?.includes(ch) || p.channel?.includes(ch)))) return false;
     const pub=isPublished(p);
     if(filters.showPublished && !pub) return false;
     if(!filters.showPublished && pub) return false;
@@ -563,7 +576,7 @@ export default function App() {
     if(filters.dateFrom &&p.addedAt<filters.dateFrom)      return false;
     if(filters.dateTo   &&p.addedAt>filters.dateTo+"T23:59:59") return false;
     return true;
-  }),[allProducts,filters,pubV]);
+  }),[allProducts,filters,pubV,disabledChannels]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -647,16 +660,7 @@ export default function App() {
                 <button className="btn-sm" onClick={selectAll}>Вибрати всі</button>
                 <button className="btn-sm" onClick={clearSel}>Скинути</button>
                 <span className="sel-count">{selected.size>0?`Вибрано: ${selected.size}`:`${filtered.length} товарів`}</span>
-                <select
-                  className="sort-select"
-                  value={sortOrder}
-                  onChange={e => setSortOrder(e.target.value)}
-                >
-                  <option value="newest">Нові</option>
-                  <option value="oldest">Старі</option>
-                  <option value="price_asc">Від дешевих до дорогих</option>
-                  <option value="price_desc">Від дорогих до дешевих</option>
-                </select>
+                <SortDropdown value={sortOrder} onChange={setSortOrder} />
               </div>
               <div className="feed-toolbar-right">
                 <button className="btn-add" onClick={()=>setShowAdd(true)}>+ Додати товар</button>
@@ -680,7 +684,7 @@ export default function App() {
       )}
 
       {/* ── SOURCES ── */}
-      {view==="sources" && <SourcesView serverOnline={serverOnline} onProductsLoaded={()=>setPubV(v=>v+1)}/>}
+      {view==="sources" && <SourcesView serverOnline={serverOnline} onProductsLoaded={()=>setPubV(v=>v+1)} onChannelToggle={()=>setDisabledChannels(JSON.parse(localStorage.getItem("mp_disabled_channels")||"[]"))}/>}
 
       {/* ── MARKETS ── */}
       {view==="markets" && (

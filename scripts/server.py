@@ -20,6 +20,10 @@ load_dotenv(ENV_PATH)
 
 import logging
 
+def log(msg):
+    from datetime import datetime
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
 app        = Flask(__name__)
@@ -77,7 +81,7 @@ def download_photo(url: str) -> str | None:
 
         return f"http://localhost:5001/photos/{filename}"
     except Exception as e:
-        print(f"⚠️ Не вдалось скачати фото {url}: {e}")
+        log(f"⚠️ Не вдалось скачати фото {url}: {e}")
         return None
 
 # ── Парсинг тексту товару ─────────────────────────────────
@@ -130,7 +134,7 @@ def fetch_telegram(url: str) -> dict:
     raw_photos  = list(dict.fromkeys(raw_photos))  # без дублів
 
     # Скачуємо фото локально
-    print(f"📥 Скачую {len(raw_photos)} фото з Telegram...")
+    log(f"📥 Скачую {len(raw_photos)} фото з Telegram...")
     local_photos = [p for p in (download_photo(u) for u in raw_photos[:10]) if p]
 
     product = parse_text(raw_text)
@@ -158,7 +162,7 @@ def fetch_mydrop(url: str) -> dict:
 
         # Скачуємо фото
         raw_photos = p.get("images", [])
-        print(f"📥 Скачую {len(raw_photos)} фото з MyDrop...")
+        log(f"📥 Скачую {len(raw_photos)} фото з MyDrop...")
         local_photos = [lp for lp in (download_photo(u) for u in raw_photos[:10]) if lp]
 
         return {
@@ -187,7 +191,7 @@ def fetch_keycrm(url: str) -> dict:
         sizes  = [o.get("properties",{}).get("size","") for o in offers if o.get("quantity",0)>0]
         raw_photos = [a["url"] for a in p.get("attachments",[]) if a.get("url")]
 
-        print(f"📥 Скачую {len(raw_photos)} фото з KeyCRM...")
+        log(f"📥 Скачую {len(raw_photos)} фото з KeyCRM...")
         local_photos = [lp for lp in (download_photo(u) for u in raw_photos[:10]) if lp]
 
         return {
@@ -315,7 +319,7 @@ def sync_source(source: str) -> dict:
                     if ch not in pending:
                         pending.append(ch)
                         pending_file.write_text(json.dumps(pending, ensure_ascii=False, indent=2), encoding="utf-8")
-                    print(f"⚠️ {ch}: приватний канал, збережено для пізнішого додавання")
+                    log(f"⚠️ {ch}: приватний канал, збережено для пізнішого додавання")
                     continue
                 # Витягуємо username з повного URL якщо потрібно
                 if ch.startswith("https://t.me/"):
@@ -327,18 +331,46 @@ def sync_source(source: str) -> dict:
                 post_urls = list(dict.fromkeys(post_urls))[:50]
                 ch_count = 0
                 DATE_FROM = datetime(2026, 1, 1, tzinfo=timezone.utc)
+                # Групуємо пости по альбому (grouped_id)
+                seen_ids = set()
                 for purl in post_urls:
+                    post_id = purl.split('/')[-1]
+                    if post_id in seen_ids:
+                        continue
+                    # Збираємо всі фото з поста та сусідніх (альбом ±3)
                     p = fetch_telegram(purl)
                     if not p.get("error") and p.get("name"):
-                        p["id"] = f"tg_{purl.split('/')[-1]}_{ch}"
+                        # Додатково збираємо фото з сусідніх постів альбому
+                        try:
+                            base_id = int(post_id)
+                            extra_photos = []
+                            for offset in range(1, 4):
+                                neighbor_url = purl.rsplit('/', 1)[0] + f"/{base_id + offset}"
+                                neighbor_html = requests.get(neighbor_url + "?embed=1&single=1", headers={"User-Agent":"Mozilla/5.0"}, timeout=5).text
+                                neighbor_text = re.search(r'class="tgme_widget_message_text[^"]*"', neighbor_html)
+                                if neighbor_text:
+                                    break  # новий пост з текстом — альбом закінчився
+                                neighbor_photos = re.findall(r"background-image:url\('(https://[^']+)'\)", neighbor_html)
+                                neighbor_photos += re.findall(r'<img[^>]+src=[\'"]?(https://cdn[^\'">\s]+)[\'"]?', neighbor_html)
+                                for np_url in neighbor_photos:
+                                    local = download_photo(np_url)
+                                    if local and local not in extra_photos:
+                                        extra_photos.append(local)
+                                seen_ids.add(str(base_id + offset))
+                            if extra_photos:
+                                existing_photos = [ph for ph in p["photos"].split(", ") if ph]
+                                p["photos"] = ", ".join(existing_photos + extra_photos)
+                        except:
+                            pass
+                        p["id"] = f"tg_{post_id}_{ch}"
                         p["supplier"] = ch
                         p["addedAt"] = datetime.now(timezone.utc).isoformat()
-                        if datetime.fromisoformat(p["addedAt"]) >= DATE_FROM:
-                            new_products.append(p)
-                            ch_count += 1
+                        new_products.append(p)
+                        ch_count += 1
+                        seen_ids.add(post_id)
                 channel_results[ch] = {"status": "ok", "count": ch_count}
             except Exception as e:
-                print(f"⚠️ {ch}: {e}")
+                log(f"⚠️ {ch}: {e}")
                 channel_results[ch] = {"status": "error", "message": str(e)}
 
     elif source == "mydrop":
@@ -419,29 +451,26 @@ def sync_route(source):
     if "error" in result: return jsonify(result), 400
     return jsonify(result)
 
-import logging
-
-log = logging.getLogger("werkzeug")
-log.setLevel(logging.ERROR)
+logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
 if __name__ == "__main__":
-    print("🚀 Сервер запущено на http://localhost:5001")
-    print(f"   Фото зберігаються в: {PHOTOS_DIR}")
-    print("   Залиш це вікно відкритим поки працюєш з додатком.\n")
-    print("✅ Сервер активний. Для зупинки натисни CTRL+C\n")
+    log("🚀 Сервер запущено на http://localhost:5001")
+    log(f"   Фото зберігаються в: {PHOTOS_DIR}")
+    log("   Залиш це вікно відкритим поки працюєш з додатком.\n")
+    log("✅ Сервер активний. Для зупинки натисни CTRL+C\n")
     import threading
 
     def auto_sync_loop():
         import time
         INTERVAL = 30 * 60  # 30 хвилин
-        print("🤖 Автосинк запущено — кожні 30 хвилин\n")
+        log("🤖 Автосинк запущено — кожні 30 хвилин\n")
         while True:
-            print("🔄 Автосинк: синхронізую Telegram...")
+            log("🔄 Автосинк: синхронізую Telegram...")
             try:
                 result = sync_source("telegram")
-                print(f"✅ Автосинк: нових {result.get('new_count',0)} | дублів {result.get('skipped',0)}")
+                log(f"✅ Автосинк: нових {result.get('new_count',0)} | дублів {result.get('skipped',0)}")
             except Exception as e:
-                print(f"❌ Автосинк помилка: {e}")
+                log(f"❌ Автосинк помилка: {e}")
             time.sleep(INTERVAL)
 
     threading.Thread(target=auto_sync_loop, daemon=True).start()

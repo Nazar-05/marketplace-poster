@@ -68,7 +68,7 @@ def mark_as_published(product: dict, source: str = "crm", marketplaces: list = N
         db["by_hash"][make_hash(product)] = entry
 
     _save_db(db)
-    print(f"✅ Збережено: {product.get('name', '?')} [{source}]")
+    log(f"✅ Збережено: {product.get('name', '?')} [{source}]")
 
 
 def filter_new(products: list, source: str = "crm") -> tuple[list, list]:
@@ -84,14 +84,14 @@ def filter_new(products: list, source: str = "crm") -> tuple[list, list]:
         else:
             new_products.append(p)
 
-    print(f"📦 Всього: {len(products)} | Нових: {len(new_products)} | Дублікатів: {len(skipped)}")
+    log(f"📦 Всього: {len(products)} | Нових: {len(new_products)} | Дублікатів: {len(skipped)}")
     return new_products, skipped
 
 
 def show_stats():
     """Показує статистику опублікованих товарів."""
     db = _load_db()
-    print(f"\n📊 Статистика бази:")
-    print(f"  З CRM (по SKU):      {len(db['by_sku'])} товарів")
-    print(f"  З Telegram (по хешу): {len(db['by_hash'])} товарів")
-    print(f"  Всього:              {len(db['by_sku']) + len(db['by_hash'])} товарів\n")
+    log(f"\n📊 Статистика бази:")
+    log(f"  З CRM (по SKU):      {len(db['by_sku'])} товарів")
+    log(f"  З Telegram (по хешу): {len(db['by_hash'])} товарів")
+    log(f"  Всього:              {len(db['by_sku']) + len(db['by_hash'])} товарів\n")

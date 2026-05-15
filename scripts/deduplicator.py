@@ -80,7 +80,7 @@ def mark_published(product: dict, source: str = "crm", marketplaces: list = None
         db["by_hash"][make_hash(product)] = entry
 
     _save(db)
-    print(f"✅ Записано: {product.get('name', '')} [{source}]")
+    log(f"✅ Записано: {product.get('name', '')} [{source}]")
 
 
 def get_stats() -> dict:
@@ -97,6 +97,6 @@ def reset(confirm: bool = False):
     """Очистити базу (тільки якщо confirm=True)."""
     if confirm:
         _save({"by_sku": {}, "by_hash": {}})
-        print("🗑 База дублікатів очищена")
+        log("🗑 База дублікатів очищена")
     else:
-        print("⚠ Передай confirm=True щоб очистити базу")
+        log("⚠ Передай confirm=True щоб очистити базу")

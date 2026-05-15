@@ -39,7 +39,7 @@ def get_all_products():
             break
         all_products.extend(batch)
         page += 1
-    print(f"✅ Отримано {len(all_products)} товарів з KeyCRM")
+    log(f"✅ Отримано {len(all_products)} товарів з KeyCRM")
     return all_products
 
 
@@ -65,7 +65,7 @@ def to_marketplace_format(product: dict) -> dict:
 
 
 if __name__ == "__main__":
-    print("🔄 KeyCRM: отримуємо товари...")
+    log("🔄 KeyCRM: отримуємо товари...")
 
     try:
         raw = get_all_products()
@@ -75,15 +75,15 @@ if __name__ == "__main__":
         new_products, skipped = filter_new(products, source="crm")
 
         if new_products:
-            print(f"\n📋 Нові товари для публікації:")
+            log(f"\n📋 Нові товари для публікації:")
             for p in new_products:
-                print(f"  - {p['name']} (SKU: {p['sku']})")
+                log(f"  - {p['name']} (SKU: {p['sku']})")
         else:
-            print("✓ Нових товарів немає — всі вже опубліковані")
+            log("✓ Нових товарів немає — всі вже опубліковані")
 
         show_stats()
 
     except requests.exceptions.HTTPError as e:
-        print(f"❌ Помилка API KeyCRM: {e}")
+        log(f"❌ Помилка API KeyCRM: {e}")
     except Exception as e:
-        print(f"❌ Помилка: {e}")
+        log(f"❌ Помилка: {e}")

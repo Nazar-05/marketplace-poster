@@ -25,7 +25,7 @@ def get_products():
     response = requests.get(f"{MYDROP_BASE}/products", headers=HEADERS)
     response.raise_for_status()
     products = response.json()
-    print(f"✅ Отримано {len(products)} товарів з MyDrop")
+    log(f"✅ Отримано {len(products)} товарів з MyDrop")
     return products
 
 
@@ -58,12 +58,12 @@ def create_order(product_sku: str, quantity: int = 1, customer: dict = None):
     }
     response = requests.post(f"{MYDROP_BASE}/orders", headers=HEADERS, json=payload)
     response.raise_for_status()
-    print(f"✅ Замовлення створено для SKU: {product_sku}")
+    log(f"✅ Замовлення створено для SKU: {product_sku}")
     return response.json()
 
 
 if __name__ == "__main__":
-    print("🔄 MyDrop: отримуємо товари...")
+    log("🔄 MyDrop: отримуємо товари...")
 
     try:
         raw = get_products()
@@ -73,15 +73,15 @@ if __name__ == "__main__":
         new_products, skipped = filter_new(products, source="crm")
 
         if new_products:
-            print(f"\n📋 Нові товари для публікації:")
+            log(f"\n📋 Нові товари для публікації:")
             for p in new_products:
-                print(f"  - {p['name']} (SKU: {p['sku']})")
+                log(f"  - {p['name']} (SKU: {p['sku']})")
         else:
-            print("✓ Нових товарів немає — всі вже опубліковані")
+            log("✓ Нових товарів немає — всі вже опубліковані")
 
         show_stats()
 
     except requests.exceptions.HTTPError as e:
-        print(f"❌ Помилка API MyDrop: {e}")
+        log(f"❌ Помилка API MyDrop: {e}")
     except Exception as e:
-        print(f"❌ Помилка: {e}")
+        log(f"❌ Помилка: {e}")

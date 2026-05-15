@@ -16,7 +16,7 @@ try:
     from telethon import TelegramClient
     from telethon.tl.types import MessageMediaPhoto
 except ImportError:
-    print("❌ Встанови telethon: pip install telethon")
+    log("❌ Встанови telethon: pip install telethon")
     exit(1)
 
 API_ID   = 0
@@ -66,7 +66,7 @@ async def fetch_products():
     await client.start()
 
     products = []
-    print(f"🔄 Читаємо канал {CHANNEL}...")
+    log(f"🔄 Читаємо канал {CHANNEL}...")
 
     async for message in client.iter_messages(CHANNEL, limit=LIMIT):
         if message.action is not None:
@@ -76,7 +76,7 @@ async def fetch_products():
             products.append(product)
 
     await client.disconnect()
-    print(f"✅ Знайдено {len(products)} товарів")
+    log(f"✅ Знайдено {len(products)} товарів")
     return products
 
 
@@ -87,11 +87,11 @@ async def main():
     new_products, skipped = filter_new(products, source="telegram")
 
     if new_products:
-        print(f"\n📋 Нові товари для публікації:")
+        log(f"\n📋 Нові товари для публікації:")
         for p in new_products:
-            print(f"  - {p['name']} | {p['price']} грн")
+            log(f"  - {p['name']} | {p['price']} грн")
     else:
-        print("✓ Нових товарів немає")
+        log("✓ Нових товарів немає")
 
     show_stats()
     return new_products
