@@ -26,6 +26,7 @@ function getPub()    { try{return JSON.parse(localStorage.getItem(LS_PUB)||"{}")
 function isPublished(p){ return !!getPub()[makeKey(p)]; }
 function markPublished(p,markets){ const db=getPub(); db[makeKey(p)]={name:p.name,at:new Date().toISOString(),markets}; localStorage.setItem(LS_PUB,JSON.stringify(db)); }
 function getPubInfo(p){ return getPub()[makeKey(p)]||null; }
+function clearPublished(keys){ if(keys){const db=getPub();keys.forEach(k=>delete db[k]);localStorage.setItem(LS_PUB,JSON.stringify(db));}else{localStorage.removeItem(LS_PUB);} }
 function getEnabledMkts(){ try{return JSON.parse(localStorage.getItem(LS_MKT)||"null")||{rozetka:true,prom:true,shafa:true,kasta:false,olx:false};}catch{return{rozetka:true,prom:true,shafa:true,kasta:false,olx:false};} }
 function saveEnabledMkts(v){ localStorage.setItem(LS_MKT,JSON.stringify(v)); }
 function getManual(){ try{return JSON.parse(localStorage.getItem(LS_MANUAL)||"[]");}catch{return[];} }
@@ -55,32 +56,95 @@ function Toast({ msg, onClose }) {
 }
 
 // ════════ ProductCard ════════
-function ProductCard({ product, selected, onSelect, published }) {
+function ProductCard({ product, selected, onSelect, published, onDelete, onView }) {
   const photo = product.photos?.split(",")[0]?.trim();
   const pubInfo = published ? getPubInfo(product) : null;
   const pubDate = pubInfo?.at ? new Date(pubInfo.at).toLocaleDateString("uk-UA") : "";
 
   return (
-    <div className={`pcard ${selected?"pcard-sel":""} ${published?"pcard-pub":""}`}
-      onClick={()=>!published && onSelect(product.id)}
-      title={published?`Опубліковано ${pubDate}`:""}>
-      <div className="pcard-img-wrap">
+    <div className={`pcard ${selected?"pcard-sel":""} ${published?"pcard-pub":""}`}>
+      <div className="pcard-img-wrap" onClick={()=>onSelect(product.id)}>
         {photo ? <img src={photo} alt={product.name} className="pcard-img" onError={e=>e.target.style.display="none"}/> : <div className="pcard-no-img">📷</div>}
         {published && <div className="pcard-pub-overlay">✓ Опубліковано<br/><span style={{fontSize:10,opacity:.85}}>{pubDate}</span></div>}
-        {!published && <div className={`pcard-check ${selected?"checked":""}`}>{selected?"✓":""}</div>}
+        <div className={`pcard-check ${selected?"checked":""}`}>{selected?"✓":""}</div>
       </div>
       <div className="pcard-body">
         <div className="pcard-top">
           <span className="pcard-src" style={{background:SOURCE_COLORS[product.source]||"#888"}}>{SOURCE_LABELS[product.source]||product.source}</span>
           <span className="pcard-date">{product.addedAt?new Date(product.addedAt).toLocaleDateString("uk-UA"):""}</span>
         </div>
-        <div className="pcard-name">{product.name}</div>
+        <div className="pcard-name" onClick={()=>onView(product)} style={{cursor:"pointer"}}>{product.name}</div>
         <div className="pcard-brand">{product.brand}</div>
         <div className="pcard-row">
           <span className="pcard-price">{product.price?`${product.price} грн`:"—"}</span>
           {product.size&&<span className="pcard-size">{product.size}</span>}
         </div>
         {product.supplier&&<div className="pcard-supplier">📦 {product.supplier}</div>}
+        <div className="pcard-actions">
+          <button className="pcard-btn-view" onClick={()=>onView(product)}>👁 Переглянути</button>
+          <button className="pcard-btn-del" onClick={e=>{e.stopPropagation();onDelete(product.id);}}>🗑</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════ ProductViewModal ════════
+function ProductViewModal({ product, onClose, onPublish, onDelete, published }) {
+  const photos = (product.photos||"").split(",").map(p=>p.trim()).filter(Boolean);
+  const [photoIdx, setPhotoIdx] = useState(0);
+  const pubInfo = published ? getPubInfo(product) : null;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{maxWidth:600,width:"95%"}} onClick={e=>e.stopPropagation()}>
+        <div className="modal-header">
+          <h3 style={{fontSize:16}}>{product.name||"Без назви"}</h3>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          {photos.length>0 && (
+            <div style={{marginBottom:16}}>
+              <img src={photos[photoIdx]} alt="" style={{width:"100%",maxHeight:320,objectFit:"contain",borderRadius:8,background:"#f5f5f5"}} onError={e=>e.target.style.display="none"}/>
+              {photos.length>1 && (
+                <div style={{display:"flex",gap:6,marginTop:8,overflowX:"auto"}}>
+                  {photos.map((ph,i)=>(
+                    <img key={i} src={ph} alt="" onClick={()=>setPhotoIdx(i)}
+                      style={{width:56,height:56,objectFit:"cover",borderRadius:6,cursor:"pointer",border:i===photoIdx?"2px solid #4F46E5":"2px solid transparent",flexShrink:0}}
+                      onError={e=>e.target.style.display="none"}/>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="grid2" style={{gap:8,marginBottom:12}}>
+            {[["Бренд",product.brand],["Ціна",product.price?`${product.price} грн`:"—"],["Розмір",product.size],["Колір",product.color],["Матеріал",product.material],["Стать",product.gender],["Стан",product.condition],["Категорія",product.category],["Постачальник",product.supplier],["Джерело",SOURCE_LABELS[product.source]||product.source]].filter(([,v])=>v).map(([l,v])=>(
+              <div key={l} style={{background:"var(--color-background-secondary)",borderRadius:6,padding:"6px 10px"}}>
+                <div style={{fontSize:11,color:"var(--color-text-secondary)"}}>{l}</div>
+                <div style={{fontSize:13,fontWeight:500}}>{v}</div>
+              </div>
+            ))}
+          </div>
+
+          {product.description && (
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:4}}>Опис</div>
+              <div style={{fontSize:13,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{product.description}</div>
+            </div>
+          )}
+
+          {published && pubInfo && (
+            <div className="info-box" style={{marginBottom:12}}>
+              ✓ Опубліковано {new Date(pubInfo.at).toLocaleDateString("uk-UA")} · {(pubInfo.markets||[]).join(", ")}
+            </div>
+          )}
+
+          <div className="row-btns">
+            <button className="btn-secondary" style={{color:"#c0392b",borderColor:"#c0392b"}} onClick={()=>{onDelete(product.id);onClose();}}>🗑 Видалити</button>
+            {!published && <button className="btn-primary" onClick={()=>{onPublish(product.id);onClose();}}>Публікувати →</button>}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -308,8 +372,51 @@ function AddProductModal({ onClose, onAdd, serverOnline }) {
   );
 }
 
+// ════════ ResetPublishedWidget ════════
+function ResetPublishedWidget({ onReset }) {
+  const [pubDb, setPubDb] = useState(getPub);
+  const [selected, setSelected] = useState(new Set());
+  const [confirm, setConfirm] = useState(false);
+  const entries = Object.entries(pubDb);
+
+  function refresh(){ setPubDb(getPub()); setSelected(new Set()); setConfirm(false); onReset(); }
+  function toggleKey(k){ setSelected(s=>{const n=new Set(s);n.has(k)?n.delete(k):n.add(k);return n;}); }
+  function resetSelected(){ clearPublished([...selected]); refresh(); }
+  function resetAll(){ clearPublished(); refresh(); }
+
+  if(entries.length===0) return <div className="info-box">Немає опублікованих товарів.</div>;
+
+  return (
+    <div>
+      <div style={{maxHeight:220,overflowY:"auto",border:"1px solid var(--color-border-tertiary)",borderRadius:8,marginBottom:12}}>
+        {entries.map(([k,info])=>(
+          <label key={k} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 12px",
+            borderBottom:"1px solid var(--color-border-tertiary)",cursor:"pointer",
+            background:selected.has(k)?"var(--color-background-secondary)":"transparent"}}>
+            <input type="checkbox" checked={selected.has(k)} onChange={()=>toggleKey(k)}/>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontWeight:500,fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{info.name||k}</div>
+              <div style={{fontSize:12,color:"var(--color-text-secondary)"}}>{new Date(info.at).toLocaleDateString("uk-UA")} · {(info.markets||[]).join(", ")}</div>
+            </div>
+          </label>
+        ))}
+      </div>
+      <div className="row-btns">
+        {selected.size>0 && <button className="btn-secondary" onClick={resetSelected}>Скинути вибрані ({selected.size})</button>}
+        {!confirm
+          ? <button className="btn-secondary" style={{color:"#c0392b",borderColor:"#c0392b"}} onClick={()=>setConfirm(true)}>Скинути всі ({entries.length})</button>
+          : <>
+              <button className="btn-primary" style={{background:"#c0392b"}} onClick={resetAll}>Підтвердити</button>
+              <button className="btn-secondary" onClick={()=>setConfirm(false)}>Скасувати</button>
+            </>
+        }
+      </div>
+    </div>
+  );
+}
+
 // ════════ SettingsView ════════
-function SettingsView({ serverOnline }) {
+function SettingsView({ serverOnline, onReset }) {
   const [form, setForm] = useState({ telegram_mode:"public", telegram_channels:"", mydrop_token:"", keycrm_key:"", telegram_api_id:"", telegram_api_hash:"" });
   const [status, setStatus] = useState(null); // {has_mydrop_token, has_keycrm_key, has_telegram_api}
   const [saved, setSaved]   = useState(false);
@@ -397,6 +504,12 @@ function SettingsView({ serverOnline }) {
       <button className="btn-primary mt16" onClick={save} disabled={!serverOnline}>
         {saved ? "✓ Збережено!" : "Зберегти налаштування"}
       </button>
+
+      <div className="settings-section" style={{marginTop:24}}>
+        <h3 className="settings-title">🗑 Скинути публікації</h3>
+        <p className="hint">Товари знову з'являться у стрічці як нові.</p>
+        <ResetPublishedWidget onReset={()=>setPubV(v=>v+1)}/>
+      </div>
     </div>
   );
 }
@@ -413,6 +526,7 @@ export default function App() {
   const [pubV, setPubV]         = useState(0);
   const [serverOnline, setServerOnline] = useState(false);
   const [toast, setToast]       = useState("");
+  const [viewProduct, setViewProduct] = useState(null);
 
   // Перевірка сервера
   useEffect(()=>{
@@ -436,7 +550,8 @@ export default function App() {
 
   const filtered = useMemo(()=>allProducts.filter(p=>{
     const pub=isPublished(p);
-    if(!filters.showPublished&&pub) return false;
+    if(filters.showPublished && !pub) return false;
+    if(!filters.showPublished && pub) return false;
     if(filters.search&&!`${p.name} ${p.brand}`.toLowerCase().includes(filters.search.toLowerCase())) return false;
     if(filters.source   &&p.source   !==filters.source)   return false;
     if(filters.supplier &&p.supplier !==filters.supplier)  return false;
@@ -456,6 +571,40 @@ export default function App() {
   function clearSel() { setSelected(new Set()); }
 
   function handleAdd(p){ const m=getManual(); m.push(p); saveManual(m); setAll(prev=>[...prev,p]); setToast(`✓ Товар "${p.name}" додано`); }
+
+  function handleDelete(id){
+    if(!window.confirm("Видалити товар?")) return;
+    const manual=getManual().filter(p=>p.id!==id); saveManual(manual);
+    setAll(prev=>prev.filter(p=>p.id!==id));
+    setSelected(s=>{const n=new Set(s);n.delete(id);return n;});
+    setToast("🗑 Товар видалено");
+  }
+
+  function handlePublishOne(id){
+    const product=allProducts.find(p=>p.id===id); if(!product) return;
+    const active=MARKETPLACES.filter(m=>enabled[m.id]&&!m.disabled);
+    const gen=active.map(m=>{const{format,content}=generateOutput(product,m.id);return{product,marketplace:m,format,content};});
+    markPublished(product,active.map(m=>m.id));
+    setGen(gen); setPubV(v=>v+1); setView("result");
+    setToast(`✓ Опубліковано "${product.name}"`);
+  }
+
+  function handleDelete(id){
+    if(!window.confirm("Видалити товар?")) return;
+    const manual=getManual().filter(p=>p.id!==id); saveManual(manual);
+    setAll(prev=>prev.filter(p=>p.id!==id));
+    setSelected(s=>{const n=new Set(s);n.delete(id);return n;});
+    setToast("🗑 Товар видалено");
+  }
+
+  function handlePublishOne(id){
+    const product=allProducts.find(p=>p.id===id); if(!product) return;
+    const active=MARKETPLACES.filter(m=>enabled[m.id]&&!m.disabled);
+    const gen=active.map(m=>{const{format,content}=generateOutput(product,m.id);return{product,marketplace:m,format,content};});
+    markPublished(product,active.map(m=>m.id));
+    setGen(gen); setPubV(v=>v+1); setView("result");
+    setToast(`✓ Опубліковано "${product.name}"`);
+  }
 
   function handlePublish(){
     const toPublish=allProducts.filter(p=>selected.has(p.id));
@@ -508,15 +657,20 @@ export default function App() {
               </div>
               <div className="feed-toolbar-right">
                 <button className="btn-add" onClick={()=>setShowAdd(true)}>+ Додати товар</button>
-                <button className="btn-publish" disabled={selected.size===0||activeCount===0} onClick={handlePublish}>
-                  Публікувати {selected.size>0?`(${selected.size})`:""} →
-                </button>
+                {filters.showPublished
+                  ? <button className="btn-publish" style={{background:"#c0392b"}} disabled={selected.size===0} onClick={()=>{ clearPublished([...selected].map(id=>makeKey(allProducts.find(p=>p.id===id)))); setSelected(new Set()); setPubV(v=>v+1); setToast(`✓ Скинуто публікацію для ${selected.size} товарів`); }}>
+                      Скинути публікації {selected.size>0?`(${selected.size})`:""} →
+                    </button>
+                  : <button className="btn-publish" disabled={selected.size===0||activeCount===0} onClick={handlePublish}>
+                      Публікувати {selected.size>0?`(${selected.size})`:""} →
+                    </button>
+                }
               </div>
             </div>
             {activeCount===0&&<div className="info-box mb12">⚠️ Жоден маркетплейс не увімкнений. <button className="link-btn" onClick={()=>setView("markets")}>Перейти →</button></div>}
             {filtered.length===0
               ?<div className="empty-state">😕 Товарів не знайдено.<br/><button className="link-btn" onClick={()=>setView("sources")}>Додайте джерела даних →</button></div>
-              :<div className="feed-grid">{filtered.map(p=><ProductCard key={p.id} product={p} selected={selected.has(p.id)} onSelect={toggleSelect} published={isPublished(p)}/>)}</div>
+              :<div className="feed-grid">{filtered.map(p=><ProductCard key={p.id} product={p} selected={selected.has(p.id)} onSelect={toggleSelect} published={isPublished(p)} onDelete={handleDelete} onView={setViewProduct}/>)}</div>
             }
           </div>
         </div>
@@ -579,9 +733,10 @@ export default function App() {
       )}
 
       {/* ── SETTINGS ── */}
-      {view==="settings" && <SettingsView serverOnline={serverOnline}/>}
+      {view==="settings" && <SettingsView serverOnline={serverOnline} onReset={()=>setPubV(v=>v+1)}/>}
 
       {showAdd && <AddProductModal onClose={()=>setShowAdd(false)} onAdd={handleAdd} serverOnline={serverOnline}/>}
+      {viewProduct && <ProductViewModal product={viewProduct} onClose={()=>setViewProduct(null)} onDelete={handleDelete} onPublish={handlePublishOne} published={isPublished(viewProduct)}/>}
     </div>
   );
 }

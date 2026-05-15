@@ -69,6 +69,8 @@ async def fetch_products():
     print(f"🔄 Читаємо канал {CHANNEL}...")
 
     async for message in client.iter_messages(CHANNEL, limit=LIMIT):
+        if message.action is not None:
+            continue
         product = parse_post(message)
         if product:
             products.append(product)
