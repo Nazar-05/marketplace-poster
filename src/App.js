@@ -596,8 +596,8 @@ const filtered = useMemo(()=>allProducts.filter(p=>{
     const arr = [...filtered];
     switch (sortOrder) {
       case "newest": return arr.sort((a,b) => {
-        const da = a.post_date ? a.post_date.split(".").reverse().join("-") : (a.addedAt||"").slice(0,10);
-        const db = b.post_date ? b.post_date.split(".").reverse().join("-") : (b.addedAt||"").slice(0,10);
+        const da = a.post_datetime || (a.post_date ? a.post_date.split(".").reverse().join("-") : (a.addedAt||"").slice(0,10));
+        const db = b.post_datetime || (b.post_date ? b.post_date.split(".").reverse().join("-") : (b.addedAt||"").slice(0,10));
         return db.localeCompare(da);
       });
       case "oldest": return arr.sort((a,b) => {

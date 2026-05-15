@@ -170,8 +170,14 @@ def fetch_telegram(url: str) -> dict:
     product["photos"] = ", ".join(local_photos)
     product["source"] = "telegram"
     # Витягуємо дату публікації
-    date_match = re.search(r'datetime="(\d{4}-\d{2}-\d{2})', html)
-    product["post_date"] = datetime.strptime(date_match.group(1), "%Y-%m-%d").strftime("%d.%m.%Y") if date_match else ""
+    date_match = re.search(r'datetime="(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})', html)
+    if date_match:
+        dt = datetime.strptime(date_match.group(1), "%Y-%m-%dT%H:%M:%S")
+        product["post_date"] = dt.strftime("%d.%m.%Y")
+        product["post_datetime"] = dt.isoformat()
+    else:
+        product["post_date"] = ""
+        product["post_datetime"] = ""
     return product
 
 # ── MyDrop ────────────────────────────────────────────────
