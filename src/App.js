@@ -85,7 +85,10 @@ function ProductCard({ product, selected, onSelect, published, onDelete, onView 
           <span className="pcard-price">{product.price?`${product.price} грн`:"—"}</span>
           {product.size&&<span className="pcard-size">{product.size}</span>}
         </div>
-        {product.supplier&&<div className="pcard-supplier">📦 {product.supplier}</div>}
+        {product.source_url
+          ? <div className="pcard-supplier"><a href={product.source_url} target="_blank" rel="noreferrer" style={{color:"inherit",textDecoration:"none"}}>🔗 {product.source_url}</a></div>
+          : product.supplier&&<div className="pcard-supplier">📦 {product.supplier}</div>
+        }
         <div className="pcard-actions">
           <button className="pcard-btn-view" onClick={()=>onView(product)}>👁 Переглянути</button>
           <button className="pcard-btn-del" onClick={e=>{e.stopPropagation();onDelete(product.id);}}>🗑</button>
@@ -125,10 +128,10 @@ function ProductViewModal({ product, onClose, onPublish, onDelete, published }) 
           )}
 
           <div className="grid2" style={{gap:8,marginBottom:12}}>
-            {[["Бренд",product.brand],["Ціна",product.price?`${product.price} грн`:"—"],["Розмір",product.size],["Колір",product.color],["Матеріал",product.material],["Стать",product.gender],["Стан",product.condition],["Категорія",product.category],["Постачальник",product.supplier],["Джерело",SOURCE_LABELS[product.source]||product.source]].filter(([,v])=>v).map(([l,v])=>(
+            {[["Бренд",product.brand],["Ціна",product.price?`${product.price} грн`:"—"],["Розмір",product.size],["Колір",product.color],["Матеріал",product.material],["Стать",product.gender],["Стан",product.condition],["Категорія",product.category],["Постачальник",product.supplier],["Джерело",SOURCE_LABELS[product.source]||product.source],["Дата поста",product.post_date],["Посилання на пост",product.post_url]].filter(([,v])=>v).map(([l,v])=>(
               <div key={l} style={{background:"var(--color-background-secondary)",borderRadius:6,padding:"6px 10px"}}>
-                <div style={{fontSize:11,color:"var(--color-text-secondary)"}}>{l}</div>
-                <div style={{fontSize:13,fontWeight:500}}>{v}</div>
+                <div style={{fontSize:11,color:"var(--color-text-secondary)",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.04em"}}>{l}</div>
+                {v?.startsWith("http") ? <a href={v} target="_blank" rel="noreferrer" style={{fontSize:13,color:"#4F46E5",wordBreak:"break-all"}}>{v}</a> : <div style={{fontSize:13}}>{v}</div>}
               </div>
             ))}
           </div>

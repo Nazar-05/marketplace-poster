@@ -157,7 +157,11 @@ export default function SourcesView({ serverOnline, onProductsLoaded, onChannelT
     setLogs(l => ({ ...l, [source]: [] }));
     addLog(source, `🔄 Синхронізація з ${source}...`);
     try {
-      const res  = await fetch(`${SERVER}/sync/${source}`, { method: "POST" });
+      const res  = await fetch(`${SERVER}/sync/${source}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ disabled_channels: disabledChannels }),
+      });
       const data = await res.json();
       if (data.error) {
         addLog(source, `🛑 ${data.error}`);

@@ -22,7 +22,31 @@ import logging
 
 def log(msg):
     from datetime import datetime
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+    print(f"\r[{datetime.now().strftime('%H:%M:%S')}] {msg}          ")
+
+_spinner_active = [False]
+
+def start_spinner(msg="📥 Завантаження фото"):
+    import threading, itertools, time, sys
+    _spinner_active[0] = True
+    def spin():
+        for ch in itertools.cycle(["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]):
+            if not _spinner_active[0]:
+                break
+            elapsed = int(time.time() - _spinner_start[0])
+            mins, secs = divmod(elapsed, 60)
+            t = f"{mins}хв {secs}с" if mins else f"{secs}с"
+            print(f"\r  {ch} {msg}... {t}   ", end="", flush=True)
+            time.sleep(0.1)
+    _spinner_start[0] = __import__("time").time()
+    threading.Thread(target=spin, daemon=True).start()
+
+_spinner_start = [0]
+
+def stop_spinner():
+    _spinner_active[0] = False
+    __import__("time").sleep(0.15)
+    print("\r" + " " * 60 + "\r", end="", flush=True)
 
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
@@ -34,6 +58,21 @@ logging.getLogger("werkzeug").addFilter(
 )
 PHOTOS_DIR = Path(__file__).parent / "photos"
 PHOTOS_DIR.mkdir(exist_ok=True)
+
+# URL що зустрічаються часто — це аватарки каналів, фільтруємо їх
+_CHANNEL_AVATAR_URLS: set = set()
+_URL_SEEN_COUNT: dict = {}
+
+def _track_and_filter_avatars(urls: list) -> list:
+    """Відфільтровує URL які зустрічаються 4+ рази (аватарки каналів)"""
+    result = []
+    for u in urls:
+        _URL_SEEN_COUNT[u] = _URL_SEEN_COUNT.get(u, 0) + 1
+        if _URL_SEEN_COUNT[u] >= 2:
+            _CHANNEL_AVATAR_URLS.add(u)
+        if u not in _CHANNEL_AVATAR_URLS:
+            result.append(u)
+    return result
 
 # ── .env helpers ──────────────────────────────────────────
 def get_env(key, default=""):
@@ -54,7 +93,7 @@ def set_env(key, value):
     os.environ[key] = value  # оновлюємо в пам'яті
 
 # ── Завантаження фото локально ────────────────────────────
-def download_photo(url: str) -> str | None:
+def download_photo(url: str, _counter: list = None) -> str | None:
     """
     Скачує фото за URL, зберігає в папку photos/.
     Повертає локальний URL: http://localhost:5001/photos/filename.jpg
@@ -79,6 +118,8 @@ def download_photo(url: str) -> str | None:
             for chunk in resp.iter_content(8192):
                 f.write(chunk)
 
+        if _counter is not None:
+            _counter[0] += 1
         return f"http://localhost:5001/photos/{filename}"
     except Exception as e:
         log(f"⚠️ Не вдалось скачати фото {url}: {e}")
@@ -132,9 +173,9 @@ def fetch_telegram(url: str) -> dict:
     raw_photos += re.findall(r"background-image:url\('(https://[^']+)'\)", html)
     raw_photos += re.findall(r'<img[^>]+src=[\'"]?(https://cdn[^\'">\s]+)[\'"]?', html)
     raw_photos  = list(dict.fromkeys(raw_photos))  # без дублів
+    raw_photos  = _track_and_filter_avatars(raw_photos)
 
     # Скачуємо фото локально
-    log(f"📥 Скачую {len(raw_photos)} фото з Telegram...")
     local_photos = [p for p in (download_photo(u) for u in raw_photos[:10]) if p]
 
     product = parse_text(raw_text)
@@ -162,7 +203,6 @@ def fetch_mydrop(url: str) -> dict:
 
         # Скачуємо фото
         raw_photos = p.get("images", [])
-        log(f"📥 Скачую {len(raw_photos)} фото з MyDrop...")
         local_photos = [lp for lp in (download_photo(u) for u in raw_photos[:10]) if lp]
 
         return {
@@ -191,7 +231,6 @@ def fetch_keycrm(url: str) -> dict:
         sizes  = [o.get("properties",{}).get("size","") for o in offers if o.get("quantity",0)>0]
         raw_photos = [a["url"] for a in p.get("attachments",[]) if a.get("url")]
 
-        log(f"📥 Скачую {len(raw_photos)} фото з KeyCRM...")
         local_photos = [lp for lp in (download_photo(u) for u in raw_photos[:10]) if lp]
 
         return {
@@ -281,8 +320,17 @@ def get_synced_products():
 import sys, os
 sys.path.insert(0, str(Path(__file__).parent))
 
-def sync_source(source: str) -> dict:
+def sync_source(source: str, disabled_channels: list = None) -> dict:
+    if disabled_channels is None:
+        disabled_channels = []
     """Отримує товари з джерела та зберігає у products.json"""
+    _sync_start = datetime.now()
+    _photo_count = [0]
+    # ВИПРАВЛЕНО: два окремі рядки замість злитого оголошення
+    _private_skipped = []
+    _disabled_skipped = []
+    log(f"📥 Починаю завантаження фото...")
+    start_spinner("📥 Завантаження фото")
     public_dir = Path(__file__).parent.parent / "public"
     products_file = public_dir / "synced_products.json"
 
@@ -304,6 +352,12 @@ def sync_source(source: str) -> dict:
     if source == "telegram":
         channels = [c.strip() for c in get_env("TELEGRAM_CHANNELS","").split(",") if c.strip()]
         for ch in channels:
+            ch_url = f"https://t.me/{ch.lstrip('@')}" if not ch.startswith("http") else ch
+            # ВИПРАВЛЕНО: прибрано дублюючий if, правильний відступ блоку
+            if ch in disabled_channels or ch_url in disabled_channels:
+                _disabled_skipped.append(ch)
+                log(f"⏭ Пропускаю вимкнений канал: {ch}")
+                continue
             url = f"https://t.me/{ch.lstrip('@')}" if not ch.startswith("http") else ch
             # Беремо останні 20 постів каналу
             try:
@@ -319,7 +373,7 @@ def sync_source(source: str) -> dict:
                     if ch not in pending:
                         pending.append(ch)
                         pending_file.write_text(json.dumps(pending, ensure_ascii=False, indent=2), encoding="utf-8")
-                    log(f"⚠️ {ch}: приватний канал, збережено для пізнішого додавання")
+                    _private_skipped.append(ch)
                     continue
                 # Витягуємо username з повного URL якщо потрібно
                 if ch.startswith("https://t.me/"):
@@ -340,30 +394,12 @@ def sync_source(source: str) -> dict:
                     # Збираємо всі фото з поста та сусідніх (альбом ±3)
                     p = fetch_telegram(purl)
                     if not p.get("error") and p.get("name"):
-                        # Додатково збираємо фото з сусідніх постів альбому
-                        try:
-                            base_id = int(post_id)
-                            extra_photos = []
-                            for offset in range(1, 4):
-                                neighbor_url = purl.rsplit('/', 1)[0] + f"/{base_id + offset}"
-                                neighbor_html = requests.get(neighbor_url + "?embed=1&single=1", headers={"User-Agent":"Mozilla/5.0"}, timeout=5).text
-                                neighbor_text = re.search(r'class="tgme_widget_message_text[^"]*"', neighbor_html)
-                                if neighbor_text:
-                                    break  # новий пост з текстом — альбом закінчився
-                                neighbor_photos = re.findall(r"background-image:url\('(https://[^']+)'\)", neighbor_html)
-                                neighbor_photos += re.findall(r'<img[^>]+src=[\'"]?(https://cdn[^\'">\s]+)[\'"]?', neighbor_html)
-                                for np_url in neighbor_photos:
-                                    local = download_photo(np_url)
-                                    if local and local not in extra_photos:
-                                        extra_photos.append(local)
-                                seen_ids.add(str(base_id + offset))
-                            if extra_photos:
-                                existing_photos = [ph for ph in p["photos"].split(", ") if ph]
-                                p["photos"] = ", ".join(existing_photos + extra_photos)
-                        except:
-                            pass
+                        pass
                         p["id"] = f"tg_{post_id}_{ch}"
                         p["supplier"] = ch
+                        p["source_url"] = purl
+                        p["post_url"] = purl
+                        p["post_date"] = datetime.now(timezone.utc).strftime("%d.%m.%Y")
                         p["addedAt"] = datetime.now(timezone.utc).isoformat()
                         new_products.append(p)
                         ch_count += 1
@@ -427,6 +463,17 @@ def sync_source(source: str) -> dict:
     merged = existing + truly_new
     products_file.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    stop_spinner()
+    elapsed = (datetime.now() - _sync_start).seconds
+    mins, secs = divmod(elapsed, 60)
+    time_str = f"{mins} хв {secs} сек" if mins else f"{secs} сек"
+
+    # ВИПРАВЛЕНО: правильний відступ для цих рядків (на рівні функції)
+    disabled_info = f" | ⏩ вимкнених: {len(_disabled_skipped)}" if _disabled_skipped else ""
+    private_info  = f" | ⚠️ приватних: {len(_private_skipped)}" if _private_skipped else ""
+    if disabled_info or private_info:
+        log(f"{disabled_info.strip(' |')}{private_info}".strip(" |"))
+
     return {"total": len(new_products), "new_count": len(truly_new), "skipped": len(new_products)-len(truly_new), "channel_results": channel_results if source == "telegram" else {}}
 
 @app.route("/pending-private-channels", methods=["GET"])
@@ -447,13 +494,19 @@ def clear_pending_private():
 def sync_route(source):
     if source not in ("telegram","mydrop","keycrm"):
         return jsonify({"error":"Невідоме джерело"}), 400
-    result = sync_source(source)
+    data = request.get_json() or {}
+    disabled_channels = data.get("disabled_channels", [])
+    # Зберігаємо вимкнені канали щоб автосинк теж їх пропускав
+    disabled_file = Path(__file__).parent.parent / "public" / "disabled_channels.json"
+    disabled_file.write_text(json.dumps(disabled_channels, ensure_ascii=False), encoding="utf-8")
+    result = sync_source(source, disabled_channels=disabled_channels)
     if "error" in result: return jsonify(result), 400
     return jsonify(result)
 
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
 if __name__ == "__main__":
+    print("")  # порожній рядок перед логами Flask
     log("🚀 Сервер запущено на http://localhost:5001")
     log(f"   Фото зберігаються в: {PHOTOS_DIR}")
     log("   Залиш це вікно відкритим поки працюєш з додатком.\n")
@@ -464,10 +517,16 @@ if __name__ == "__main__":
         import time
         INTERVAL = 30 * 60  # 30 хвилин
         log("🤖 Автосинк запущено — кожні 30 хвилин\n")
+        time.sleep(20)  # чекаємо 20 секунд перед першим синком
         while True:
             log("🔄 Автосинк: синхронізую Telegram...")
             try:
-                result = sync_source("telegram")
+                disabled = []
+                disabled_file = Path(__file__).parent.parent / "public" / "disabled_channels.json"
+                if disabled_file.exists():
+                    try: disabled = json.loads(disabled_file.read_text(encoding="utf-8"))
+                    except: disabled = []
+                result = sync_source("telegram", disabled_channels=disabled)
                 log(f"✅ Автосинк: нових {result.get('new_count',0)} | дублів {result.get('skipped',0)}")
             except Exception as e:
                 log(f"❌ Автосинк помилка: {e}")

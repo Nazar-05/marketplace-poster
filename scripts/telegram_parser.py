@@ -1,22 +1,18 @@
 """
 Telegram — парсинг товарів з каналу постачальника
 Дедублікація по хешу контенту (назва + ціна + фото).
-
-НАЛАШТУВАННЯ:
-1. Вкажи API_ID та API_HASH нижче (https://my.telegram.org → App configuration)
-2. Вкажи USERNAME каналу постачальника
-3. Запусти: python telegram_parser.py
 """
 
 import asyncio
 import re
+from collections import defaultdict
 from deduplication import filter_new, mark_as_published, show_stats
 
 try:
     from telethon import TelegramClient
-    from telethon.tl.types import MessageMediaPhoto
+    from telethon.tl.types import MessageMediaPhoto, MessageService
 except ImportError:
-    log("❌ Встанови telethon: pip install telethon")
+    print("❌ Встанови telethon: pip install telethon")
     exit(1)
 
 API_ID   = 0
@@ -25,16 +21,31 @@ CHANNEL  = "@назва_каналу_постачальника"
 LIMIT    = 50
 
 
-def parse_post(message) -> dict | None:
-    text = message.text or ""
+def parse_post(messages: list) -> dict | None:
+    """
+    Приймає список повідомлень одного альбому (або одне повідомлення).
+    Збирає текст і ВСІ фото групи.
+    """
+    # Шукаємо текст у будь-якому повідомленні групи
+    text = ""
+    for msg in messages:
+        if msg.text:
+            text = msg.text
+            break
+
     if not text:
         return None
 
     lines = text.split("\n")
+    post_message = messages[0]
+    post_url = f"https://t.me/{CHANNEL.lstrip('@')}/{post_message.id}"
+    post_date = post_message.date.strftime("%d.%m.%Y") if post_message.date else ""
+
     product = {
         "sku": "", "name": "", "brand": "", "price": "",
         "size": "", "color": "", "material": "", "gender": "",
-        "condition": "Нове", "photos": "", "description": text,
+        "condition": "Нове", "photos": [], "description": text,
+        "post_url": post_url, "post_date": post_date,
     }
 
     for line in lines:
@@ -55,8 +66,13 @@ def parse_post(message) -> dict | None:
             product["name"] = line.strip()
             break
 
-    if message.media and isinstance(message.media, MessageMediaPhoto):
-        product["photos"] = f"tg_photo_{message.id}"
+    # Збираємо ВСІ фото з усіх повідомлень групи
+    for msg in messages:
+        if msg.media and isinstance(msg.media, MessageMediaPhoto):
+            product["photos"].append(f"tg_photo_{msg.id}")
+
+    # Для сумісності з рештою коду — рядок через кому
+    product["photos"] = ",".join(product["photos"])
 
     return product if product["name"] else None
 
@@ -65,33 +81,55 @@ async def fetch_products():
     client = TelegramClient("session_parser", API_ID, API_HASH)
     await client.start()
 
-    products = []
-    log(f"🔄 Читаємо канал {CHANNEL}...")
+    # Збираємо повідомлення, групуємо альбоми
+    solo_messages = []           # одиночні повідомлення
+    albums = defaultdict(list)   # grouped_id -> [messages]
+
+    print(f"🔄 Читаємо канал {CHANNEL}...")
 
     async for message in client.iter_messages(CHANNEL, limit=LIMIT):
+        # Пропускаємо сервісні повідомлення (зміна аватарки, назви каналу і т.д.)
+        if isinstance(message, MessageService):
+            continue
         if message.action is not None:
             continue
-        product = parse_post(message)
+
+        if message.grouped_id:
+            # Повідомлення є частиною альбому
+            albums[message.grouped_id].append(message)
+        else:
+            solo_messages.append(message)
+
+    await client.disconnect()
+
+    # Обробляємо альбоми (список повідомлень → один товар)
+    products = []
+    for group_id, msgs in albums.items():
+        product = parse_post(msgs)
         if product:
             products.append(product)
 
-    await client.disconnect()
-    log(f"✅ Знайдено {len(products)} товарів")
+    # Обробляємо одиночні повідомлення
+    for msg in solo_messages:
+        product = parse_post([msg])
+        if product:
+            products.append(product)
+
+    print(f"✅ Знайдено {len(products)} товарів")
     return products
 
 
 async def main():
     products = await fetch_products()
 
-    # Дедублікація по хешу — бо SKU у Telegram немає
     new_products, skipped = filter_new(products, source="telegram")
 
     if new_products:
-        log(f"\n📋 Нові товари для публікації:")
+        print(f"\n📋 Нові товари для публікації:")
         for p in new_products:
-            log(f"  - {p['name']} | {p['price']} грн")
+            print(f"  - {p['name']} | {p['price']} грн | фото: {len(p['photos'].split(','))}")
     else:
-        log("✓ Нових товарів немає")
+        print("✓ Нових товарів немає")
 
     show_stats()
     return new_products
