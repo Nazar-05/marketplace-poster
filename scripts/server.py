@@ -7,7 +7,7 @@
 Сервер: http://localhost:5001
 """
 
-import re, json, os, uuid, requests
+import re, json, os, uuid, hashlib, requests
 from datetime import datetime, timezone
 from pathlib import Path
 from flask import Flask, request, jsonify, send_from_directory
@@ -42,6 +42,7 @@ def start_spinner(msg="📥 Завантаження фото"):
     threading.Thread(target=spin, daemon=True).start()
 
 _spinner_start = [0]
+_photos_downloaded = [0]
 
 def stop_spinner():
     _spinner_active[0] = False
@@ -97,11 +98,14 @@ def download_photo(url: str, _counter: list = None) -> str | None:
         elif "webp" in ct: ext = ".webp"
         elif "gif" in ct:  ext = ".gif"
 
-        filename = f"{uuid.uuid4().hex}{ext}"
+        filename = f"{hashlib.md5(url.encode()).hexdigest()}{ext}"
         filepath = PHOTOS_DIR / filename
+        if filepath.exists():
+            return f"http://localhost:5001/photos/{filename}"
         with open(filepath, "wb") as f:
             for chunk in resp.iter_content(8192):
                 f.write(chunk)
+        _photos_downloaded[0] += 1
 
         if _counter is not None:
             _counter[0] += 1
@@ -313,11 +317,11 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
     """Отримує товари з джерела та зберігає у products.json"""
     _sync_start = datetime.now()
     _photo_count = [0]
+    _photos_downloaded[0] = 0
     # ВИПРАВЛЕНО: два окремі рядки замість злитого оголошення
     _private_skipped = []
     _disabled_skipped = []
-    log(f"📥 Починаю завантаження фото...")
-    start_spinner("📥 Завантаження фото")
+    log(f"📥 Починаю синхронізацію...")
     public_dir = Path(__file__).parent.parent / "public"
     products_file = public_dir / "synced_products.json"
 
@@ -369,24 +373,53 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                 all_post_urls = []
                 page_url = f"https://t.me/s/{ch_name}"
                 pages_fetched = 0
+                _link_count = [0]
+                _collecting = [True]
+                def _spin_links():
+                    import itertools, time
+                    for sp in itertools.cycle(["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]):
+                        if not _collecting[0]: break
+                        _elapsed = int((datetime.now() - _sync_start).total_seconds())
+                        _mins, _secs = divmod(_elapsed, 60)
+                        _t = f"{_mins}хв {_secs}с" if _mins else f"{_secs}с"
+                        print(f"\r  {sp} 🔗 Збираю посилання: {_link_count[0]} | ⏱ {_t}          ", end="", flush=True)
+                        time.sleep(0.1)
+                import threading
+                threading.Thread(target=_spin_links, daemon=True).start()
                 while page_url:
                     resp = requests.get(page_url, headers={"User-Agent":"Mozilla/5.0"}, timeout=10)
                     found = re.findall(r'href="(https://t\.me/[^"]+/\d+)"', resp.text)
                     all_post_urls.extend(found)
+                    _link_count[0] = len(all_post_urls)
+                    # Зупиняємось якщо сторінка містить пости старші за DATE_FROM
+                    dates_on_page = re.findall(r'datetime="(\d{4}-\d{2}-\d{2})', resp.text)
+                    if dates_on_page and min(dates_on_page) < "2026-01-01":
+                        break
                     prev_match = re.search(r'href="/s/' + ch_name + r'\?before=(\d+)"', resp.text)
                     if prev_match:
                         page_url = f"https://t.me/s/{ch_name}?before={prev_match.group(1)}"
                     else:
                         break
-                post_urls = list(dict.fromkeys(all_post_urls))
+                _collecting[0] = False
+                import time; time.sleep(0.15)
+                existing_post_ids = {p.get("id") for p in existing}
+                post_urls = [u for u in dict.fromkeys(all_post_urls) if f"tg_{u.split('/')[-1]}_{ch}" not in existing_post_ids]
+                print(f"\r{' ' * 80}")
+                print(f"  ✅ Нових постів для обробки: {len(post_urls)}")
                 ch_count = 0
                 DATE_FROM = datetime(2026, 1, 1, tzinfo=timezone.utc)
                 # Групуємо пости по альбому (grouped_id)
                 seen_ids = set()
                 stop_parsing = False
-                for purl in post_urls:
+                total_posts = len(post_urls)
+                for post_idx, purl in enumerate(post_urls, 1):
                     if stop_parsing:
                         break
+                    _elapsed = int((datetime.now() - _sync_start).total_seconds())
+                    _mins, _secs = divmod(_elapsed, 60)
+                    _t = f"{_mins}хв {_secs}с" if _mins else f"{_secs}с"
+                    _sp = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"][post_idx % 10]
+                    print(f"\r  {_sp} 📄 Канал @{ch_name}: пост {post_idx}/{total_posts} | 📥 фото: {_photos_downloaded[0]} | ⏱ {_t}          ", end="", flush=True)
                     post_id = purl.split('/')[-1]
                     if post_id in seen_ids:
                         continue
@@ -516,8 +549,8 @@ logging.getLogger("werkzeug").setLevel(logging.ERROR)
 if __name__ == "__main__":
     print("")  # порожній рядок перед логами Flask
     log("🚀 Сервер запущено на http://localhost:5001")
-    log(f"   Фото зберігаються в: {PHOTOS_DIR}")
-    log("   Залиш це вікно відкритим поки працюєш з додатком.\n")
+    log(f"📁 Фото зберігаються в: {PHOTOS_DIR}")
+    log("💡 Залиш це вікно відкритим поки працюєш з додатком.\n")
     log("✅ Сервер активний. Для зупинки натисни CTRL+C\n")
     import threading
 
