@@ -59,21 +59,6 @@ logging.getLogger("werkzeug").addFilter(
 PHOTOS_DIR = Path(__file__).parent / "photos"
 PHOTOS_DIR.mkdir(exist_ok=True)
 
-# URL що зустрічаються часто — це аватарки каналів, фільтруємо їх
-_CHANNEL_AVATAR_URLS: set = set()
-_URL_SEEN_COUNT: dict = {}
-
-def _track_and_filter_avatars(urls: list) -> list:
-    """Відфільтровує URL які зустрічаються 4+ рази (аватарки каналів)"""
-    result = []
-    for u in urls:
-        _URL_SEEN_COUNT[u] = _URL_SEEN_COUNT.get(u, 0) + 1
-        if _URL_SEEN_COUNT[u] >= 2:
-            _CHANNEL_AVATAR_URLS.add(u)
-        if u not in _CHANNEL_AVATAR_URLS:
-            result.append(u)
-    return result
-
 # ── .env helpers ──────────────────────────────────────────
 def get_env(key, default=""):
     return os.getenv(key, default) or default
@@ -152,7 +137,7 @@ def parse_text(text: str) -> dict:
 
 # ── Telegram публічний пост ───────────────────────────────
 def fetch_telegram(url: str) -> dict:
-    embed_url = url.rstrip("/") + "?embed=1&single=1"
+    embed_url = url.rstrip("/") + "?embed=1"
     headers   = {"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)"}
     try:
         resp = requests.get(embed_url, headers=headers, timeout=12)
@@ -168,12 +153,11 @@ def fetch_telegram(url: str) -> dict:
         raw_text = re.sub(r"<[^>]+>", "\n", text_match.group(1)).strip()
         raw_text = re.sub(r"\n{3,}", "\n\n", raw_text)
 
-    # Фото URLs з HTML
+    # Фото URLs з HTML (тільки фото товару, без аватарок)
     raw_photos = []
-    raw_photos += re.findall(r"background-image:url\('(https://[^']+)'\)", html)
-    raw_photos += re.findall(r'<img[^>]+src=[\'"]?(https://cdn[^\'">\s]+)[\'"]?', html)
-    raw_photos  = list(dict.fromkeys(raw_photos))  # без дублів
-    raw_photos  = _track_and_filter_avatars(raw_photos)
+    # Фото товару — тільки з photo_wrap блоків
+    raw_photos += re.findall(r'tgme_widget_message_photo_wrap[^>]*style="[^"]*background-image:url\(\'(https://[^\']+)\'\)', html)
+    raw_photos = list(dict.fromkeys(raw_photos))
 
     # Скачуємо фото локально
     local_photos = [p for p in (download_photo(u) for u in raw_photos[:10]) if p]
@@ -181,6 +165,9 @@ def fetch_telegram(url: str) -> dict:
     product = parse_text(raw_text)
     product["photos"] = ", ".join(local_photos)
     product["source"] = "telegram"
+    # Витягуємо дату публікації
+    date_match = re.search(r'datetime="(\d{4}-\d{2}-\d{2})', html)
+    product["post_date"] = datetime.strptime(date_match.group(1), "%Y-%m-%d").strftime("%d.%m.%Y") if date_match else ""
     return product
 
 # ── MyDrop ────────────────────────────────────────────────
@@ -356,7 +343,6 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
             # ВИПРАВЛЕНО: прибрано дублюючий if, правильний відступ блоку
             if ch in disabled_channels or ch_url in disabled_channels:
                 _disabled_skipped.append(ch)
-                log(f"⏭ Пропускаю вимкнений канал: {ch}")
                 continue
             url = f"https://t.me/{ch.lstrip('@')}" if not ch.startswith("http") else ch
             # Беремо останні 20 постів каналу
@@ -380,9 +366,21 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                     ch_name = ch.replace("https://t.me/", "").strip("/")
                 else:
                     ch_name = ch.lstrip("@")
-                resp = requests.get(f"https://t.me/s/{ch_name}", headers={"User-Agent":"Mozilla/5.0"}, timeout=10)
-                post_urls = re.findall(r'href="(https://t\.me/[^"]+/\d+)"', resp.text)
-                post_urls = list(dict.fromkeys(post_urls))[:50]
+                all_post_urls = []
+                page_url = f"https://t.me/s/{ch_name}"
+                pages_fetched = 0
+                MAX_PAGES = 5
+                while page_url and pages_fetched < MAX_PAGES:
+                    resp = requests.get(page_url, headers={"User-Agent":"Mozilla/5.0"}, timeout=10)
+                    found = re.findall(r'href="(https://t\.me/[^"]+/\d+)"', resp.text)
+                    all_post_urls.extend(found)
+                    prev_match = re.search(r'href="/s/' + ch_name + r'\?before=(\d+)"', resp.text)
+                    if prev_match:
+                        page_url = f"https://t.me/s/{ch_name}?before={prev_match.group(1)}"
+                    else:
+                        break
+                    pages_fetched += 1
+                post_urls = list(dict.fromkeys(all_post_urls))
                 ch_count = 0
                 DATE_FROM = datetime(2026, 1, 1, tzinfo=timezone.utc)
                 # Групуємо пости по альбому (grouped_id)
@@ -393,13 +391,15 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                         continue
                     # Збираємо всі фото з поста та сусідніх (альбом ±3)
                     p = fetch_telegram(purl)
-                    if not p.get("error") and p.get("name"):
-                        pass
+                    log(f"  пост {purl}: name={repr(p.get('name',''))[:30]} err={p.get('error','')[:50] if p.get('error') else ''}")
+                    if not p.get("error") and (p.get("name") or p.get("description")):
+                        if not p.get("name") and p.get("description"):
+                            first_line = p["description"].split("\n")[0].strip()
+                            p["name"] = first_line[:80] if first_line else "Без назви"
                         p["id"] = f"tg_{post_id}_{ch}"
                         p["supplier"] = ch
                         p["source_url"] = purl
                         p["post_url"] = purl
-                        p["post_date"] = datetime.now(timezone.utc).strftime("%d.%m.%Y")
                         p["addedAt"] = datetime.now(timezone.utc).isoformat()
                         new_products.append(p)
                         ch_count += 1
@@ -471,10 +471,8 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
     # ВИПРАВЛЕНО: правильний відступ для цих рядків (на рівні функції)
     disabled_info = f" | ⏩ вимкнених: {len(_disabled_skipped)}" if _disabled_skipped else ""
     private_info  = f" | ⚠️ приватних: {len(_private_skipped)}" if _private_skipped else ""
-    if disabled_info or private_info:
-        log(f"{disabled_info.strip(' |')}{private_info}".strip(" |"))
 
-    return {"total": len(new_products), "new_count": len(truly_new), "skipped": len(new_products)-len(truly_new), "channel_results": channel_results if source == "telegram" else {}}
+    return {"total": len(new_products), "new_count": len(truly_new), "skipped": len(new_products)-len(truly_new), "channel_results": channel_results if source == "telegram" else {}, "disabled_info": disabled_info, "private_info": private_info}
 
 @app.route("/pending-private-channels", methods=["GET"])
 def get_pending_private():
@@ -527,7 +525,9 @@ if __name__ == "__main__":
                     try: disabled = json.loads(disabled_file.read_text(encoding="utf-8"))
                     except: disabled = []
                 result = sync_source("telegram", disabled_channels=disabled)
-                log(f"✅ Автосинк: нових {result.get('new_count',0)} | дублів {result.get('skipped',0)}")
+                extra = (result.get('disabled_info','') + result.get('private_info','')).strip(' |')
+                suffix = f" | {extra}" if extra else ""
+                log(f"✅ Автосинк: нових {result.get('new_count',0)} | дублів {result.get('skipped',0)}{suffix}")
             except Exception as e:
                 log(f"❌ Автосинк помилка: {e}")
             time.sleep(INTERVAL)

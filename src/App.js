@@ -77,7 +77,7 @@ function ProductCard({ product, selected, onSelect, published, onDelete, onView 
       <div className="pcard-body">
         <div className="pcard-top">
           <span className="pcard-src" style={{background:SOURCE_COLORS[product.source]||"#888"}}>{SOURCE_LABELS[product.source]||product.source}</span>
-          <span className="pcard-date">{product.addedAt?new Date(product.addedAt).toLocaleDateString("uk-UA"):""}</span>
+          <span className="pcard-date">{product.post_date || (product.addedAt?new Date(product.addedAt).toLocaleDateString("uk-UA"):"")}</span>
         </div>
         <div className="pcard-name" onClick={()=>onView(product)} style={{cursor:"pointer"}}>{product.name}</div>
         <div className="pcard-brand">{product.brand}</div>
