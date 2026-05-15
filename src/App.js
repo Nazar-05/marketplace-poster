@@ -198,7 +198,6 @@ function FiltersBar({ filters, setFilters, products }) {
 // ════════ ProductForm ════════
 function ProductForm({ product, setProduct, onSave, onBack, backLabel="← Назад", serverOnline }) {
   const set=(k,v)=>setProduct(p=>({...p,[k]:v}));
-  // photos зберігаємо як масив всередині форми
   const photosArr = Array.isArray(product.photos) ? product.photos : (product.photos||"").split(",").map(p=>p.trim()).filter(Boolean);
   const setPhotos = (arr) => setProduct(p=>({...p, photos:arr}));
 
@@ -265,7 +264,6 @@ function AddProductModal({ onClose, onAdd, serverOnline }) {
   async function parseText() {
     if (!text.trim()) return;
     if (!serverOnline) {
-      // Парсимо локально якщо сервер не запущено
       const lines = text.split("\n");
       const p = {...emptyProduct, description:text, source:"telegram", id:Date.now().toString(), addedAt:new Date().toISOString()};
       for (const line of lines) {
@@ -315,7 +313,6 @@ function AddProductModal({ onClose, onAdd, serverOnline }) {
             </div>
 
             <div className="modal-body">
-              {/* Вкладка: Посилання */}
               {tab === "link" && (
                 <div>
                   {!serverOnline && <div className="warn-box mb12">⚠️ Для автозаповнення запусти в терміналі:<br/><code>python scripts/server.py</code></div>}
@@ -331,7 +328,6 @@ function AddProductModal({ onClose, onAdd, serverOnline }) {
                 </div>
               )}
 
-              {/* Вкладка: Текст поста */}
               {tab === "text" && (
                 <div>
                   <label className="field-label">Вставте текст з поста Telegram або CRM:</label>
@@ -345,7 +341,6 @@ function AddProductModal({ onClose, onAdd, serverOnline }) {
                 </div>
               )}
 
-              {/* Вкладка: Вручну */}
               {tab === "manual" && (
                 <div>
                   <button className="btn-primary" onClick={()=>{ setProduct({...emptyProduct,id:Date.now().toString(),addedAt:new Date().toISOString()}); setShowForm(true); }}>
@@ -418,7 +413,7 @@ function ResetPublishedWidget({ onReset }) {
 // ════════ SettingsView ════════
 function SettingsView({ serverOnline, onReset }) {
   const [form, setForm] = useState({ telegram_mode:"public", telegram_channels:"", mydrop_token:"", keycrm_key:"", telegram_api_id:"", telegram_api_hash:"" });
-  const [status, setStatus] = useState(null); // {has_mydrop_token, has_keycrm_key, has_telegram_api}
+  const [status, setStatus] = useState(null);
   const [saved, setSaved]   = useState(false);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
 
@@ -444,8 +439,9 @@ function SettingsView({ serverOnline, onReset }) {
 
       <div className="settings-section">
         <h3 className="settings-title">
-  <img src="https://www.google.com/s2/favicons?domain=telegram.org&sz=64" alt="Telegram" className="source-logo" style={{verticalAlign:"middle",marginRight:8}}/>
-  Telegram</h3>
+          <img src="https://www.google.com/s2/favicons?domain=telegram.org&sz=64" alt="Telegram" className="source-logo" style={{verticalAlign:"middle",marginRight:8}}/>
+          Telegram
+        </h3>
         <label className="filter-label">Режим каналів</label>
         <div className="radio-group">
           <label className="radio-label">
@@ -479,8 +475,9 @@ function SettingsView({ serverOnline, onReset }) {
 
       <div className="settings-section">
         <h3 className="settings-title">
-  <img src="https://www.google.com/s2/favicons?domain=mydrop.com.ua&sz=64" alt="MyDrop" className="source-logo" style={{verticalAlign:"middle",marginRight:8}}/>
-  <a href="https://mydrop.com.ua" target="_blank" rel="noreferrer" style={{textDecoration:"none",color:"inherit",fontWeight:600}}>MyDrop</a> {status?.has_mydrop_token&&<span className="badge-green" style={{fontSize:11}}>✓ Збережено</span>}</h3>
+          <img src="https://www.google.com/s2/favicons?domain=mydrop.com.ua&sz=64" alt="MyDrop" className="source-logo" style={{verticalAlign:"middle",marginRight:8}}/>
+          <a href="https://mydrop.com.ua" target="_blank" rel="noreferrer" style={{textDecoration:"none",color:"inherit",fontWeight:600}}>MyDrop</a> {status?.has_mydrop_token&&<span className="badge-green" style={{fontSize:11}}>✓ Збережено</span>}
+        </h3>
         <div className="field">
           <label className="field-label">API Токен <span className="hint-inline">(MyDrop → Інтеграції → API)</span></label>
           <input className="input" type="password" value={form.mydrop_token} onChange={e=>set("mydrop_token",e.target.value)} placeholder="Вставте токен..."/>
@@ -489,8 +486,9 @@ function SettingsView({ serverOnline, onReset }) {
 
       <div className="settings-section">
         <h3 className="settings-title">
-  <img src="https://www.google.com/s2/favicons?domain=keycrm.app&sz=64" alt="KeyCRM" className="source-logo" style={{verticalAlign:"middle",marginRight:8}}/>
-  <a href="https://keycrm.app" target="_blank" rel="noreferrer" style={{textDecoration:"none",color:"inherit",fontWeight:600}}>KeyCRM</a> {status?.has_keycrm_key&&<span className="badge-green" style={{fontSize:11}}>✓ Збережено</span>}</h3>
+          <img src="https://www.google.com/s2/favicons?domain=keycrm.app&sz=64" alt="KeyCRM" className="source-logo" style={{verticalAlign:"middle",marginRight:8}}/>
+          <a href="https://keycrm.app" target="_blank" rel="noreferrer" style={{textDecoration:"none",color:"inherit",fontWeight:600}}>KeyCRM</a> {status?.has_keycrm_key&&<span className="badge-green" style={{fontSize:11}}>✓ Збережено</span>}
+        </h3>
         <div className="field">
           <label className="field-label">API Ключ <span className="hint-inline">(KeyCRM → Налаштування → API)</span></label>
           <input className="input" type="password" value={form.keycrm_key} onChange={e=>set("keycrm_key",e.target.value)} placeholder="Вставте ключ..."/>
@@ -508,7 +506,7 @@ function SettingsView({ serverOnline, onReset }) {
       <div className="settings-section" style={{marginTop:24}}>
         <h3 className="settings-title">🗑 Скинути публікації</h3>
         <p className="hint">Товари знову з'являться у стрічці як нові.</p>
-        <ResetPublishedWidget onReset={()=>setPubV(v=>v+1)}/>
+        <ResetPublishedWidget onReset={onReset}/>
       </div>
     </div>
   );
@@ -527,6 +525,7 @@ export default function App() {
   const [serverOnline, setServerOnline] = useState(false);
   const [toast, setToast]       = useState("");
   const [viewProduct, setViewProduct] = useState(null);
+  const [sortOrder, setSortOrder] = useState("newest");
 
   // Перевірка сервера
   useEffect(()=>{
@@ -566,28 +565,22 @@ export default function App() {
     return true;
   }),[allProducts,filters,pubV]);
 
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    switch (sortOrder) {
+      case "newest":     return arr.sort((a,b) => (b.addedAt||"").localeCompare(a.addedAt||""));
+      case "oldest":     return arr.sort((a,b) => (a.addedAt||"").localeCompare(b.addedAt||""));
+      case "price_asc":  return arr.sort((a,b) => (+a.price||0) - (+b.price||0));
+      case "price_desc": return arr.sort((a,b) => (+b.price||0) - (+a.price||0));
+      default: return arr;
+    }
+  }, [filtered, sortOrder]);
+
   function toggleSelect(id){ setSelected(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n;}); }
   function selectAll(){ setSelected(new Set(filtered.filter(p=>!isPublished(p)).map(p=>p.id))); }
   function clearSel() { setSelected(new Set()); }
 
   function handleAdd(p){ const m=getManual(); m.push(p); saveManual(m); setAll(prev=>[...prev,p]); setToast(`✓ Товар "${p.name}" додано`); }
-
-  function handleDelete(id){
-    if(!window.confirm("Видалити товар?")) return;
-    const manual=getManual().filter(p=>p.id!==id); saveManual(manual);
-    setAll(prev=>prev.filter(p=>p.id!==id));
-    setSelected(s=>{const n=new Set(s);n.delete(id);return n;});
-    setToast("🗑 Товар видалено");
-  }
-
-  function handlePublishOne(id){
-    const product=allProducts.find(p=>p.id===id); if(!product) return;
-    const active=MARKETPLACES.filter(m=>enabled[m.id]&&!m.disabled);
-    const gen=active.map(m=>{const{format,content}=generateOutput(product,m.id);return{product,marketplace:m,format,content};});
-    markPublished(product,active.map(m=>m.id));
-    setGen(gen); setPubV(v=>v+1); setView("result");
-    setToast(`✓ Опубліковано "${product.name}"`);
-  }
 
   function handleDelete(id){
     if(!window.confirm("Видалити товар?")) return;
@@ -654,6 +647,16 @@ export default function App() {
                 <button className="btn-sm" onClick={selectAll}>Вибрати всі</button>
                 <button className="btn-sm" onClick={clearSel}>Скинути</button>
                 <span className="sel-count">{selected.size>0?`Вибрано: ${selected.size}`:`${filtered.length} товарів`}</span>
+                <select
+                  className="sort-select"
+                  value={sortOrder}
+                  onChange={e => setSortOrder(e.target.value)}
+                >
+                  <option value="newest">Нові</option>
+                  <option value="oldest">Старі</option>
+                  <option value="price_asc">Від дешевих до дорогих</option>
+                  <option value="price_desc">Від дорогих до дешевих</option>
+                </select>
               </div>
               <div className="feed-toolbar-right">
                 <button className="btn-add" onClick={()=>setShowAdd(true)}>+ Додати товар</button>
@@ -670,7 +673,7 @@ export default function App() {
             {activeCount===0&&<div className="info-box mb12">⚠️ Жоден маркетплейс не увімкнений. <button className="link-btn" onClick={()=>setView("markets")}>Перейти →</button></div>}
             {filtered.length===0
               ?<div className="empty-state">😕 Товарів не знайдено.<br/><button className="link-btn" onClick={()=>setView("sources")}>Додайте джерела даних →</button></div>
-              :<div className="feed-grid">{filtered.map(p=><ProductCard key={p.id} product={p} selected={selected.has(p.id)} onSelect={toggleSelect} published={isPublished(p)} onDelete={handleDelete} onView={setViewProduct}/>)}</div>
+              :<div className="feed-grid">{sorted.map(p=><ProductCard key={p.id} product={p} selected={selected.has(p.id)} onSelect={toggleSelect} published={isPublished(p)} onDelete={handleDelete} onView={setViewProduct}/>)}</div>
             }
           </div>
         </div>
@@ -678,6 +681,8 @@ export default function App() {
 
       {/* ── SOURCES ── */}
       {view==="sources" && <SourcesView serverOnline={serverOnline} onProductsLoaded={()=>setPubV(v=>v+1)}/>}
+
+      {/* ── MARKETS ── */}
       {view==="markets" && (
         <div className="card">
           <h2>🛒 Маркетплейси</h2>
