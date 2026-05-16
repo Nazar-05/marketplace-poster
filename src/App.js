@@ -25,6 +25,9 @@ const SOURCE_COLORS = { telegram:"#2AABEE",  mydrop:"#FF6B35", keycrm:"#4F46E5",
 
 // ── localStorage ─────────────────────────────────────────
 const LS_PUB = "mp_pub_v2", LS_MKT = "mp_mkt_v2", LS_MANUAL = "mp_manual";
+const LS_HIDDEN = "mp_hidden";
+function getHidden(){ try{return new Set(JSON.parse(localStorage.getItem(LS_HIDDEN)||"[]"));}catch{return new Set();} }
+function saveHidden(s){ localStorage.setItem(LS_HIDDEN,JSON.stringify([...s])); }
 
 function simpleHash(s){ let h=0; for(let i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0;} return Math.abs(h).toString(16); }
 function makeKey(p){ return p.sku?`sku_${p.sku}`:`hash_${simpleHash(`${(p.name||"").toLowerCase()}|${p.price}|${(p.photos||"").split(",")[0]?.trim()}`)}`; }
@@ -54,6 +57,74 @@ function dlFile(content,name,fmt){ const a=document.createElement("a"); a.href=U
 
 const emptyProduct = {id:"",sku:"",name:"",brand:"",price:"",size:"",color:"",material:"",gender:"Жіноче",condition:"Нове",category:"",photos:"",description:"",source:"manual",supplier:"",addedAt:new Date().toISOString()};
 const defaultFilters = {search:"",source:"",supplier:"",brand:"",category:"",size:"",gender:"",priceMin:"",priceMax:"",dateFrom:"",dateTo:"",showPublished:false};
+
+// ════════ DuplicatesView ════════
+function DuplicatesView({ allProducts, onRefresh }) {
+  const [hidden, setHiddenState] = useState(getHidden);
+
+  function getArt(p) {
+    const m = (p.description||"").match(/арт\.\s*([^\n,]+)/i);
+    return m ? m[1].trim().toLowerCase() : null;
+  }
+
+  const groups = useMemo(() => {
+    const map = {};
+    allProducts.forEach(p => {
+      const art = getArt(p);
+      if (!art) return;
+      if (!map[art]) map[art] = [];
+      map[art].push(p);
+    });
+    return Object.entries(map).filter(([,ps]) => ps.length > 1);
+  }, [allProducts]);
+
+  function hideProduct(id) {
+    const n = new Set(hidden); n.add(id); saveHidden(n); setHiddenState(n); onRefresh();
+  }
+  function restoreProduct(id) {
+    const n = new Set(hidden); n.delete(id); saveHidden(n); setHiddenState(n); onRefresh();
+  }
+
+  if (groups.length === 0) return (
+    <div className="card"><h2>🔁 Дублікати</h2><div className="empty-state">Дублікатів не знайдено.</div></div>
+  );
+
+  return (
+    <div className="card">
+      <h2>🔁 Дублікати</h2>
+      <p className="hint">Згруповані по артикулу. Перший — основний, решта — можливі дублікати.</p>
+      {groups.map(([art, products]) => (
+        <div key={art} style={{marginBottom:20,border:"1px solid #e5e5e5",borderRadius:12,overflow:"hidden"}}>
+          <div style={{padding:"10px 16px",background:"#f5f5f5",fontWeight:600,fontSize:13}}>
+            арт. {art} · {products.length} товари
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:12,padding:12}}>
+            {products.map((p, idx) => {
+              const photo = p.photos?.split(",")[0]?.trim();
+              const isHidden = hidden.has(p.id);
+              return (
+                <div key={p.id} style={{border:`2px solid ${idx===0?"#4f46e5":"#e5e5e5"}`,borderRadius:10,overflow:"hidden",opacity:isHidden?0.45:1}}>
+                  {photo && <img src={photo} alt="" style={{width:"100%",aspectRatio:"1",objectFit:"cover"}} onError={e=>e.target.style.display="none"}/>}
+                  <div style={{padding:8}}>
+                    {idx===0 && <span style={{fontSize:10,background:"#4f46e5",color:"#fff",padding:"2px 6px",borderRadius:4,marginBottom:4,display:"inline-block"}}>Основний</span>}
+                    {isHidden && <span style={{fontSize:10,background:"#e5e5e5",color:"#666",padding:"2px 6px",borderRadius:4,marginBottom:4,display:"inline-block"}}>Прихований</span>}
+                    <div style={{fontSize:12,fontWeight:600,marginBottom:2,lineHeight:1.3}}>{p.name}</div>
+                    <div style={{fontSize:11,color:"#aaa",marginBottom:4}}>{p.post_date}</div>
+                    {p.post_url && <a href={p.post_url} target="_blank" rel="noreferrer" style={{fontSize:11,color:"#4f46e5"}}>🔗 Пост</a>}
+                    <div style={{display:"flex",gap:4,marginTop:6}}>
+                      {idx!==0 && !isHidden && <button className="btn-sm" style={{fontSize:11,padding:"3px 8px",color:"#e53935",borderColor:"#e53935"}} onClick={()=>hideProduct(p.id)}>Приховати</button>}
+                      {isHidden && <button className="btn-sm" style={{fontSize:11,padding:"3px 8px"}} onClick={()=>restoreProduct(p.id)}>↩ Повернути</button>}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // ════════ Toast ════════
 function Toast({ msg, onClose }) {
@@ -667,7 +738,7 @@ const filtered = useMemo(()=>allProducts.filter(p=>{
       </header>
 
       <nav className="nav">
-        {[["feed","📋 Стрічка"],["sources","🔌 Джерела"],["markets","🛒 Маркетплейси"],["result","📦 Результат"],["settings","⚙️ Налаштування"]].map(([v,l])=>(
+        {[["feed","📋 Стрічка"],["sources","🔌 Джерела"],["duplicates","🔁 Дублікати"],["markets","🛒 Маркетплейси"],["result","📦 Результат"],["settings","⚙️ Налаштування"]].map(([v,l])=>(
           <button key={v} className={`nav-btn ${view===v?"active":""}`} onClick={()=>safeSetView(v)}>{l}</button>
         ))}
       </nav>
@@ -719,6 +790,9 @@ const filtered = useMemo(()=>allProducts.filter(p=>{
 
       {/* ── SOURCES ── */}
       {view==="sources" && <SourcesView serverOnline={serverOnline} onProductsLoaded={()=>setPubV(v=>v+1)} onChannelToggle={()=>setDisabledChannels(JSON.parse(localStorage.getItem("mp_disabled_channels")||"[]"))} onDirtyChange={setSourceDirty}/>}
+
+      {/* ── DUPLICATES ── */}
+      {view==="duplicates" && <DuplicatesView allProducts={allProducts} onRefresh={()=>setPubV(v=>v+1)}/>}
 
       {/* ── MARKETS ── */}
       {view==="markets" && (

@@ -418,14 +418,22 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                 seen_ids = set()
                 stop_parsing = False
                 total_posts = len(post_urls)
+                _post_idx_ref = [0]
+                _processing = [True]
+                def _spin_posts():
+                    import itertools, time
+                    for sp in itertools.cycle(["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]):
+                        if not _processing[0]: break
+                        _elapsed = int((datetime.now() - _sync_start).total_seconds())
+                        _mins, _secs = divmod(_elapsed, 60)
+                        _t = f"{_mins}хв {_secs}с" if _mins else f"{_secs}с"
+                        print(f"\r  {sp} 📄 Канал @{ch_name}: пост {_post_idx_ref[0]}/{total_posts} | 📥 фото: {_photos_downloaded[0]} | ⏱ {_t}          ", end="", flush=True)
+                        time.sleep(0.1)
+                threading.Thread(target=_spin_posts, daemon=True).start()
                 for post_idx, purl in enumerate(post_urls, 1):
+                    _post_idx_ref[0] = post_idx
                     if stop_parsing:
                         break
-                    _elapsed = int((datetime.now() - _sync_start).total_seconds())
-                    _mins, _secs = divmod(_elapsed, 60)
-                    _t = f"{_mins}хв {_secs}с" if _mins else f"{_secs}с"
-                    _sp = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"][post_idx % 10]
-                    print(f"\r  {_sp} 📄 Канал @{ch_name}: пост {post_idx}/{total_posts} | 📥 фото: {_photos_downloaded[0]} | ⏱ {_t}          ", end="", flush=True)
                     post_id = purl.split('/')[-1]
                     if post_id in seen_ids:
                         continue
@@ -453,6 +461,9 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                         new_products.append(p)
                         ch_count += 1
                         seen_ids.add(post_id)
+                        _processing[0] = False
+                import time; time.sleep(0.15)
+                print(f"\r{' ' * 80}")
                 channel_results[ch] = {"status": "ok", "count": ch_count}
             except Exception as e:
                 log(f"⚠️ {ch}: {e}")
