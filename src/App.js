@@ -614,6 +614,7 @@ export default function App() {
   const [generated, setGen]     = useState([]);
   const [pubV, setPubV]         = useState(0);
   const [serverOnline, setServerOnline] = useState(false);
+  const [lastSync, setLastSync] = useState(null);
   const [toast, setToast]       = useState("");
   const [viewProduct, setViewProduct] = useState(null);
   const [sortOrder, setSortOrder] = useState("newest");
@@ -624,6 +625,7 @@ const [disabledChannels, setDisabledChannels] = useState(() => {
   // Перевірка сервера
   useEffect(()=>{
     fetch(`${SERVER}/health`).then(()=>setServerOnline(true)).catch(()=>setServerOnline(false));
+    fetch(`${SERVER}/last-sync`).then(r=>r.json()).then(d=>setLastSync(d.synced_at)).catch(()=>{});
     const t = setInterval(()=>{ fetch(`${SERVER}/health`).then(()=>setServerOnline(true)).catch(()=>setServerOnline(false)); }, 10000);
     return ()=>clearInterval(t);
   },[]);
@@ -733,6 +735,7 @@ const filtered = useMemo(()=>allProducts.filter(p=>{
           </div>
           <div className={`server-badge ${serverOnline?"online":"offline"}`}>
             {serverOnline?"🟢 Сервер працює":"🔴 Сервер вимкнено"}
+            {lastSync && <span style={{fontSize:11,opacity:.7,marginLeft:8}}>Синк: {new Date(lastSync).toLocaleString("uk-UA")}</span>}
           </div>
         </div>
       </header>

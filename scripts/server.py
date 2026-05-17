@@ -47,7 +47,7 @@ _photos_downloaded = [0]
 def stop_spinner():
     _spinner_active[0] = False
     __import__("time").sleep(0.15)
-    print("\r" + " " * 60 + "\r", end="", flush=True)
+    print("\r" + " " * 80 + "\r", end="", flush=True)
 
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
@@ -101,6 +101,8 @@ def download_photo(url: str, _counter: list = None) -> str | None:
         filename = f"{hashlib.md5(url.encode()).hexdigest()}{ext}"
         filepath = PHOTOS_DIR / filename
         if filepath.exists():
+            if _counter is not None:
+                _counter[0] += 1
             return f"http://localhost:5001/photos/{filename}"
         with open(filepath, "wb") as f:
             for chunk in resp.iter_content(8192):
@@ -303,6 +305,14 @@ def update_settings():
 def health():
     return jsonify({"status":"ok"})
 
+@app.route("/last-sync")
+def last_sync():
+    sync_file = Path(__file__).parent.parent / "public" / "last_sync.json"
+    if not sync_file.exists():
+        return jsonify({"synced_at": None})
+    try: return jsonify(json.loads(sync_file.read_text(encoding="utf-8")))
+    except: return jsonify({"synced_at": None})
+
 @app.route("/synced-products")
 def get_synced_products():
     products_file = Path(__file__).parent.parent / "public" / "synced_products.json"
@@ -335,6 +345,13 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
     if products_file.exists():
         try: existing = json.loads(products_file.read_text(encoding="utf-8"))
         except: existing = []
+
+    # Завантажуємо прогрес синку
+    progress_file = Path(__file__).parent / "sync_progress.json"
+    sync_progress = {}
+    if progress_file.exists():
+        try: sync_progress = json.loads(progress_file.read_text(encoding="utf-8"))
+        except: sync_progress = {}
 
     # Завантажуємо published.json для дедублікації
     pub_file = Path(__file__).parent / "published.json"
@@ -390,30 +407,53 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                         _t = f"{_mins}хв {_secs}с" if _mins else f"{_secs}с"
                         print(f"\r  {sp} 🔗 Збираю посилання: {_link_count[0]} | ⏱ {_t}          ", end="", flush=True)
                         time.sleep(0.1)
+                existing_post_ids = {p.get("id") for p in existing}
+                last_synced_id = sync_progress.get(ch, {}).get("last_id")
                 import threading
                 threading.Thread(target=_spin_links, daemon=True).start()
                 while page_url:
-                    resp = requests.get(page_url, headers={"User-Agent":"Mozilla/5.0"}, timeout=10)
+                    import time; time.sleep(1)
+                    resp = requests.get(page_url, headers={"User-Agent":"Mozilla/5.0 (compatible; Googlebot/2.1)"}, timeout=10)
                     found = re.findall(r'href="(https://t\.me/[^"]+/\d+)"', resp.text)
                     all_post_urls.extend(found)
                     _link_count[0] = len(all_post_urls)
+                    # Зупиняємось якщо на сторінці є пост який вже є в базі
+                    page_has_known = any(
+                        f"tg_{u.split('/')[-1]}_{ch}" in existing_post_ids
+                        for u in found
+                    )
+                    page_has_last = last_synced_id and any(
+                        u.split('/')[-1] == last_synced_id
+                        for u in found
+                    )
+                    if page_has_known and not last_synced_id:
+                        break
+                    if page_has_last:
+                        break
                     # Зупиняємось якщо сторінка містить пости старші за DATE_FROM
+                    from datetime import timedelta
+                    date_limit = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
                     dates_on_page = re.findall(r'datetime="(\d{4}-\d{2}-\d{2})', resp.text)
-                    if dates_on_page and min(dates_on_page) < "2026-01-01":
-                        break
+                    should_stop = dates_on_page and min(dates_on_page) < date_limit
                     prev_match = re.search(r'href="/s/' + ch_name + r'\?before=(\d+)"', resp.text)
-                    if prev_match:
-                        page_url = f"https://t.me/s/{ch_name}?before={prev_match.group(1)}"
-                    else:
+                    if should_stop or not prev_match:
                         break
+                    page_url = f"https://t.me/s/{ch_name}?before={prev_match.group(1)}"
                 _collecting[0] = False
                 import time; time.sleep(0.15)
-                existing_post_ids = {p.get("id") for p in existing}
-                post_urls = [u for u in dict.fromkeys(all_post_urls) if f"tg_{u.split('/')[-1]}_{ch}" not in existing_post_ids]
-                print(f"\r{' ' * 80}")
-                print(f"  ✅ Нових постів для обробки: {len(post_urls)}")
+                print("\r" + " " * 80 + "\r", end="", flush=True)
+                # Зупиняємось на першому пості який вже є в базі
+                post_urls = []
+                for u in dict.fromkeys(all_post_urls):
+                    pid = u.split('/')[-1]
+                    if pid == last_synced_id:
+                        break
+                    if f"tg_{pid}_{ch}" in existing_post_ids and not last_synced_id:
+                        break
+                    post_urls.append(u)
                 ch_count = 0
-                DATE_FROM = datetime(2026, 1, 1, tzinfo=timezone.utc)
+                from datetime import timedelta
+                DATE_FROM = (datetime.now(timezone.utc) - timedelta(days=30))
                 # Групуємо пости по альбому (grouped_id)
                 seen_ids = set()
                 stop_parsing = False
@@ -439,20 +479,22 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                         continue
                     p = fetch_telegram(purl)
                     if p.get('error'):
+                        print(f"\r{' ' * 80}\r", end="", flush=True)
                         log(f"  ⚠️ {purl}: {p.get('error','')[:80]}")
                     # Зупиняємось якщо пост старший за DATE_FROM
                     if p.get("post_date"):
                         try:
                             post_dt = datetime.strptime(p["post_date"], "%d.%m.%Y").replace(tzinfo=timezone.utc)
                             if post_dt < DATE_FROM:
-                                stop_parsing = True
-                                break
+                                continue
                         except:
                             pass
-                    if not p.get("error") and (p.get("name") or p.get("description")):
+                    if not p.get("error"):
                         if not p.get("name") and p.get("description"):
                             first_line = p["description"].split("\n")[0].strip()
                             p["name"] = first_line[:80] if first_line else "Без назви"
+                        if not p.get("name"):
+                            p["name"] = "Без назви"
                         p["id"] = f"tg_{post_id}_{ch}"
                         p["supplier"] = ch
                         p["source_url"] = purl
@@ -461,10 +503,17 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                         new_products.append(p)
                         ch_count += 1
                         seen_ids.add(post_id)
-                        _processing[0] = False
+                        # Зберігаємо прогрес
+                        sync_progress[ch] = {"last_id": post_id}
+                        progress_file.write_text(json.dumps(sync_progress, ensure_ascii=False), encoding="utf-8")
+                _processing[0] = False
                 import time; time.sleep(0.15)
-                print(f"\r{' ' * 80}")
-                channel_results[ch] = {"status": "ok", "count": ch_count}
+                print("\r" + " " * 80 + "\r", end="", flush=True)
+                # Якщо всі пости оброблені успішно — очищаємо прогрес для цього каналу
+                if ch in sync_progress and ch_count == len(post_urls):
+                    del sync_progress[ch]
+                    progress_file.write_text(json.dumps(sync_progress, ensure_ascii=False), encoding="utf-8")
+                channel_results[ch] = {"status": "ok", "count": ch_count, "links": len(all_post_urls)}
             except Exception as e:
                 log(f"⚠️ {ch}: {e}")
                 channel_results[ch] = {"status": "error", "message": str(e)}
@@ -521,7 +570,22 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
     existing_ids = {p.get("id") for p in existing}
     truly_new = [p for p in new_products if p.get("id") not in existing_ids]
     merged = existing + truly_new
+    from datetime import timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    def get_post_dt(p):
+        pd = p.get("post_date","")
+        if pd:
+            try: return datetime.strptime(pd, "%d.%m.%Y").replace(tzinfo=timezone.utc)
+            except: pass
+        ad = p.get("addedAt","")
+        if ad:
+            try: return datetime.fromisoformat(ad)
+            except: pass
+        return datetime.now(timezone.utc)
+    merged = [p for p in merged if get_post_dt(p) >= cutoff]
     products_file.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    sync_file = public_dir / "last_sync.json"
+    sync_file.write_text(json.dumps({"synced_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False), encoding="utf-8")
 
     stop_spinner()
     elapsed = (datetime.now() - _sync_start).seconds
@@ -559,6 +623,11 @@ def sync_route(source):
     disabled_file.write_text(json.dumps(disabled_channels, ensure_ascii=False), encoding="utf-8")
     result = sync_source(source, disabled_channels=disabled_channels)
     if "error" in result: return jsonify(result), 400
+    extra = (result.get('disabled_info','') + result.get('private_info','')).strip(' |')
+    suffix = f" | {extra}" if extra else ""
+    total_links = sum(v.get('links',0) for v in result.get('channel_results',{}).values())
+    print(f"\r{' ' * 80}\r", end="", flush=True)
+    log(f"✅ Синк: нових {result.get('new_count',0)} | дублів {result.get('skipped',0)} | перевірено: {result.get('total',0)} | 📥 фото: {_photos_downloaded[0]} | 🔗 посилань: {total_links}{suffix}")
     return jsonify(result)
 
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
@@ -575,8 +644,22 @@ if __name__ == "__main__":
         import time
         INTERVAL = 30 * 60  # 30 хвилин
         log("🤖 Автосинк запущено — кожні 30 хвилин\n")
-        time.sleep(20)  # чекаємо 20 секунд перед першим синком
+        time.sleep(20)
+        first_run = True
         while True:
+            if not first_run:
+                # Перевіряємо час останнього синку
+                sync_file = Path(__file__).parent.parent / "public" / "last_sync.json"
+                if sync_file.exists():
+                    try:
+                        last = json.loads(sync_file.read_text(encoding="utf-8")).get("synced_at","")
+                        if last:
+                            diff = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds()
+                            if diff < INTERVAL:
+                                time.sleep(INTERVAL - diff)
+                                continue
+                    except: pass
+            first_run = False
             log("🔄 Автосинк: синхронізую Telegram...")
             try:
                 disabled = []
@@ -587,7 +670,8 @@ if __name__ == "__main__":
                 result = sync_source("telegram", disabled_channels=disabled)
                 extra = (result.get('disabled_info','') + result.get('private_info','')).strip(' |')
                 suffix = f" | {extra}" if extra else ""
-                log(f"✅ Автосинк: нових {result.get('new_count',0)} | дублів {result.get('skipped',0)}{suffix}")
+                total_links = sum(v.get('links',0) for v in result.get('channel_results',{}).values())
+                log(f"✅ Автосинк: нових {result.get('new_count',0)} | дублів {result.get('skipped',0)} | перевірено: {result.get('total',0)} | 📥 фото: {_photos_downloaded[0]} | 🔗 посилань: {total_links}{suffix}")
             except Exception as e:
                 log(f"❌ Автосинк помилка: {e}")
             time.sleep(INTERVAL)
