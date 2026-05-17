@@ -58,6 +58,88 @@ function dlFile(content,name,fmt){ const a=document.createElement("a"); a.href=U
 const emptyProduct = {id:"",sku:"",name:"",brand:"",price:"",size:"",color:"",material:"",gender:"Жіноче",condition:"Нове",category:"",photos:"",description:"",source:"manual",supplier:"",addedAt:new Date().toISOString()};
 const defaultFilters = {search:"",source:"",supplier:"",brand:"",category:"",size:"",gender:"",priceMin:"",priceMax:"",dateFrom:"",dateTo:"",showPublished:false};
 
+// ════════ Lightbox ════════
+function Lightbox({ images, startIndex, onClose }) {
+  const [idx, setIdx] = useState(startIndex);
+  const prev = useCallback(() => setIdx(i => (i - 1 + images.length) % images.length), [images.length]);
+  const next = useCallback(() => setIdx(i => (i + 1) % images.length), [images.length]);
+
+  useEffect(() => {
+    const handler = e => {
+      if (e.key === "ArrowLeft")  prev();
+      if (e.key === "ArrowRight") next();
+      if (e.key === "Escape")     onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [prev, next, onClose]);
+
+  return (
+    <div onClick={onClose} style={{
+      position:"fixed", inset:0, zIndex:10000,
+      background:"rgba(0,0,0,.92)",
+      display:"flex", flexDirection:"column",
+      alignItems:"center", justifyContent:"center",
+      animation:"lb-in .18s ease"
+    }}>
+      <style>{`
+        @keyframes lb-in { from{opacity:0} to{opacity:1} }
+        .lb-arrow-btn {
+          position:absolute; top:50%; transform:translateY(-50%);
+          background:rgba(255,255,255,.12); border:none; color:#fff;
+          font-size:44px; line-height:1; cursor:pointer;
+          padding:6px 16px; border-radius:8px;
+          transition:background .15s; user-select:none;
+        }
+        .lb-arrow-btn:hover { background:rgba(255,255,255,.26); }
+        .lb-thumb-strip img { transition:opacity .15s, border-color .15s; }
+        .lb-thumb-strip img:hover { opacity:.9 !important; }
+      `}</style>
+
+      {/* Кнопка закрити */}
+      <button
+        onClick={onClose}
+        style={{position:"absolute",top:16,right:20,background:"none",border:"none",color:"#fff",fontSize:30,cursor:"pointer",opacity:.8,lineHeight:1}}
+      >✕</button>
+
+      {/* Головне фото */}
+      <div onClick={e => e.stopPropagation()} style={{display:"flex",alignItems:"center",gap:8,maxWidth:"92vw"}}>
+        {images.length > 1 && (
+          <button className="lb-arrow-btn" style={{position:"static",transform:"none"}} onClick={prev}>‹</button>
+        )}
+        <img
+          src={images[idx]}
+          alt=""
+          style={{maxWidth:"80vw", maxHeight:"75vh", objectFit:"contain", borderRadius:8, boxShadow:"0 8px 40px rgba(0,0,0,.7)", display:"block"}}
+          onError={e => e.target.style.display="none"}
+        />
+        {images.length > 1 && (
+          <button className="lb-arrow-btn" style={{position:"static",transform:"none"}} onClick={next}>›</button>
+        )}
+      </div>
+
+      {/* Лічильник */}
+      {images.length > 1 && (
+        <div style={{color:"rgba(255,255,255,.6)",fontSize:13,marginTop:10}}>{idx + 1} / {images.length}</div>
+      )}
+
+      {/* Мініатюри */}
+      {images.length > 1 && (
+        <div className="lb-thumb-strip" onClick={e => e.stopPropagation()}
+          style={{display:"flex",gap:7,marginTop:12,flexWrap:"wrap",justifyContent:"center",maxWidth:"88vw"}}>
+          {images.map((src, i) => (
+            <img key={i} src={src} alt="" onClick={() => setIdx(i)}
+              style={{width:58,height:58,objectFit:"cover",borderRadius:6,cursor:"pointer",
+                border: i === idx ? "2px solid #fff" : "2px solid transparent",
+                opacity: i === idx ? 1 : 0.5}}
+              onError={e => e.target.style.display="none"}/>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ════════ DuplicatesView ════════
 function DuplicatesView({ allProducts, onRefresh }) {
   const [hidden, setHiddenState] = useState(getHidden);
@@ -150,7 +232,7 @@ function ProductCard({ product, selected, onSelect, published, onDelete, onView 
         {published && <div className="pcard-pub-overlay">✓ Опубліковано<br/><span style={{fontSize:10,opacity:.85}}>{pubDate}</span></div>}
         <div className={`pcard-check ${selected?"checked":""}`}>{selected?"✓":""}</div>
       </div>
-      <div className="pcard-body">
+      <div className="pcard-body" onClick={()=>onView(product)} style={{cursor:"pointer"}}>
         <div className="pcard-top">
           <span className="pcard-src" style={{background:"transparent", padding:"2px 4px", display:"flex", alignItems:"center", gap:4}}>
   {product.source === "telegram"
@@ -160,18 +242,18 @@ function ProductCard({ product, selected, onSelect, published, onDelete, onView 
 </span>
           <span className="pcard-date">{product.post_date || (product.addedAt?new Date(product.addedAt).toLocaleDateString("uk-UA"):"")}</span>
         </div>
-        <div className="pcard-name" onClick={()=>onView(product)} style={{cursor:"pointer"}}>{product.name}</div>
+        <div className="pcard-name">{product.name}</div>
         <div className="pcard-brand">{product.brand}</div>
         <div className="pcard-row">
           <span className="pcard-price">{product.price?`${product.price} грн`:"—"}</span>
           {product.size&&<span className="pcard-size">{product.size}</span>}
         </div>
         {product.source_url
-          ? <div className="pcard-supplier"><a href={product.source_url} target="_blank" rel="noreferrer" style={{color:"inherit",textDecoration:"none"}}>🔗 {product.source_url}</a></div>
+          ? <div className="pcard-supplier"><a href={product.source_url} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{color:"inherit",textDecoration:"none"}}>🔗 {product.source_url}</a></div>
           : product.supplier&&<div className="pcard-supplier">📦 {product.supplier_title||product.supplier}</div>
         }
         <div className="pcard-actions">
-          <button className="pcard-btn-view" onClick={()=>onView(product)}>👁 Переглянути</button>
+          <button className="pcard-btn-view" onClick={e=>{e.stopPropagation();onView(product);}}>👁 Переглянути</button>
           <button className="pcard-btn-del" onClick={e=>{e.stopPropagation();onDelete(product.id);}}>🗑</button>
         </div>
       </div>
@@ -183,6 +265,7 @@ function ProductCard({ product, selected, onSelect, published, onDelete, onView 
 function ProductViewModal({ product, onClose, onPublish, onDelete, published }) {
   const photos = (product.photos||"").split(",").map(p=>p.trim()).filter(Boolean);
   const [photoIdx, setPhotoIdx] = useState(0);
+  const [lightboxIdx, setLightboxIdx] = useState(null); // null = закрито
   const pubInfo = published ? getPubInfo(product) : null;
 
   return (
@@ -195,16 +278,37 @@ function ProductViewModal({ product, onClose, onPublish, onDelete, published }) 
         <div className="modal-body">
           {photos.length>0 && (
             <div style={{marginBottom:16}}>
-              <img src={photos[photoIdx]} alt="" style={{width:"100%",maxHeight:320,objectFit:"contain",borderRadius:8,background:"#f5f5f5"}} onError={e=>e.target.style.display="none"}/>
+              {/* Головне фото — кліком відкриває lightbox */}
+              <img
+                src={photos[photoIdx]}
+                alt=""
+                onClick={() => setLightboxIdx(photoIdx)}
+                style={{
+                  width:"100%", maxHeight:320, objectFit:"contain",
+                  borderRadius:8, background:"#f5f5f5",
+                  cursor:"zoom-in", display:"block"
+                }}
+                onError={e=>e.target.style.display="none"}
+              />
+              {/* Мініатюри */}
               {photos.length>1 && (
                 <div style={{display:"flex",gap:6,marginTop:8,overflowX:"auto"}}>
                   {photos.map((ph,i)=>(
-                    <img key={i} src={ph} alt="" onClick={()=>setPhotoIdx(i)}
-                      style={{width:56,height:56,objectFit:"cover",borderRadius:6,cursor:"pointer",border:i===photoIdx?"2px solid #4F46E5":"2px solid transparent",flexShrink:0}}
+                    <img key={i} src={ph} alt=""
+                      onClick={() => setPhotoIdx(i)}
+                      onDoubleClick={() => setLightboxIdx(i)}
+                      style={{
+                        width:56, height:56, objectFit:"cover", borderRadius:6,
+                        cursor:"pointer", flexShrink:0,
+                        border: i===photoIdx ? "2px solid #4F46E5" : "2px solid transparent"
+                      }}
                       onError={e=>e.target.style.display="none"}/>
                   ))}
                 </div>
               )}
+              <div style={{textAlign:"center",fontSize:11,color:"#bbb",marginTop:6}}>
+                Клікни на фото щоб відкрити на весь екран
+              </div>
             </div>
           )}
 
@@ -236,6 +340,15 @@ function ProductViewModal({ product, onClose, onPublish, onDelete, published }) 
           </div>
         </div>
       </div>
+
+      {/* Lightbox — рендеримо поза модалкою щоб перекрити все */}
+      {lightboxIdx !== null && (
+        <Lightbox
+          images={photos}
+          startIndex={lightboxIdx}
+          onClose={() => setLightboxIdx(null)}
+        />
+      )}
     </div>
   );
 }
@@ -639,7 +752,6 @@ export default function App() {
     try { return JSON.parse(localStorage.getItem("mp_disabled_channels") || "[]"); } catch { return []; }
   });
 
-  // Перевірка сервера
   useEffect(()=>{
     fetch(`${SERVER}/health`).then(()=>setServerOnline(true)).catch(()=>setServerOnline(false));
     fetch(`${SERVER}/last-sync`).then(r=>r.json()).then(d=>setLastSync(d.synced_at)).catch(()=>{});
@@ -647,7 +759,6 @@ export default function App() {
     return ()=>clearInterval(t);
   },[]);
 
-  // Завантаження товарів
   useEffect(()=>{
     Promise.all([
       fetch("/products.json").then(r=>r.json()).catch(()=>[]),
@@ -763,7 +874,6 @@ export default function App() {
         ))}
       </nav>
 
-      {/* ── FEED ── */}
       {view==="feed" && (
         <div className="feed-layout">
           <FiltersBar filters={filters} setFilters={setFilters} products={allProducts}/>
@@ -808,13 +918,9 @@ export default function App() {
         </div>
       )}
 
-      {/* ── SOURCES ── */}
       {view==="sources" && <SourcesView serverOnline={serverOnline} onProductsLoaded={()=>setPubV(v=>v+1)} onChannelToggle={()=>setDisabledChannels(JSON.parse(localStorage.getItem("mp_disabled_channels")||"[]"))} onDirtyChange={setSourceDirty}/>}
-
-      {/* ── DUPLICATES ── */}
       {view==="duplicates" && <DuplicatesView allProducts={allProducts} onRefresh={()=>setPubV(v=>v+1)}/>}
 
-      {/* ── MARKETS ── */}
       {view==="markets" && (
         <div className="card">
           <h2>🛒 Маркетплейси</h2>
@@ -839,7 +945,6 @@ export default function App() {
         </div>
       )}
 
-      {/* ── RESULT ── */}
       {view==="result" && (
         <div className="card">
           <h2>📦 Результат публікації</h2>
@@ -869,7 +974,6 @@ export default function App() {
         </div>
       )}
 
-      {/* ── SETTINGS ── */}
       {view==="settings" && <SettingsView serverOnline={serverOnline} onReset={()=>setPubV(v=>v+1)}/>}
 
       {showAdd && <AddProductModal onClose={()=>setShowAdd(false)} onAdd={handleAdd} serverOnline={serverOnline}/>}
