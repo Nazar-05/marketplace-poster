@@ -200,6 +200,7 @@ export default function SourcesView({ serverOnline, onProductsLoaded, onChannelT
           });
         }
         if (onProductsLoaded) onProductsLoaded();
+setReloadTick(t => t + 1);
       }
     } catch {
       addLog(source, "❌ Сервер недоступний");
@@ -214,6 +215,8 @@ export default function SourcesView({ serverOnline, onProductsLoaded, onChannelT
   const hasKey = { mydrop: settings.has_mydrop_token, keycrm: settings.has_keycrm_key };
 
   const [allProducts, setAllProducts] = useState([]);
+const [reloadTick, setReloadTick] = useState(0);
+const [channelLastDates, setChannelLastDates] = useState({});
   useEffect(() => {
     Promise.all([
       fetch("/products.json").then(r=>r.json()).catch(()=>[]),
@@ -221,10 +224,24 @@ export default function SourcesView({ serverOnline, onProductsLoaded, onChannelT
     ]).then(([base, synced]) => {
       try {
         const manual = JSON.parse(localStorage.getItem("mp_manual") || "[]");
-        setAllProducts([...base, ...synced, ...manual]);
+        const all = [...base, ...synced, ...manual];
+        setAllProducts(all);
+        const dates = {};
+        all.forEach(p => {
+          const ch = p.supplier || p.source_channel || p.channel;
+          if (!ch || !p.post_date) return;
+          const [d, m, y] = p.post_date.split(".");
+          const dt = new Date(`${y}-${m}-${d}`);
+          if (!dates[ch] || dt > dates[ch]) dates[ch] = dt;
+        });
+        const fmt = {};
+        Object.entries(dates).forEach(([ch, dt]) => {
+          fmt[ch] = dt.toLocaleDateString("uk-UA", { day:"2-digit", month:"2-digit", year:"numeric" });
+        });
+        setChannelLastDates(fmt);
       } catch { setAllProducts([...base, ...synced]); }
     });
-  }, []);
+  }, [reloadTick]);
 
   function getChannelCount(ch) {
     return allProducts.filter(p => p.supplier === ch || p.source_channel === ch || p.channel === ch).length;
@@ -309,7 +326,10 @@ export default function SourcesView({ serverOnline, onProductsLoaded, onChannelT
                     placeholder="@назва_каналу або https://t.me/назва"
                     style={{opacity: disabledChannels.includes(ch) ? 0.4 : 1}}/>
                   {ch && getChannelCount(ch) > 0 && (
-                    <span style={{fontSize:11,color:"#888",whiteSpace:"nowrap",flexShrink:0}}>{getChannelCount(ch)} шт</span>
+                    <span style={{fontSize:11,color:"#888",whiteSpace:"nowrap",flexShrink:0}}>
+                      {getChannelCount(ch)} шт
+                      {channelLastDates[ch] && <span style={{marginLeft:6,color:"#aaa"}}>· {channelLastDates[ch]}</span>}
+                    </span>
                   )}
                   <button
                     title={disabledChannels.includes(ch) ? "Увімкнути канал" : "Вимкнути канал"}

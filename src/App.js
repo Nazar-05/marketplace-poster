@@ -92,7 +92,12 @@ function DuplicatesView({ allProducts, onRefresh }) {
   return (
     <div className="card">
       <h2>🔁 Дублікати</h2>
-      <p className="hint">Згруповані по артикулу. Перший — основний, решта — можливі дублікати.</p>
+      <p className="hint">
+        Згруповані по артикулу. Перший — основний, решта — можливі дублікати. &nbsp;
+        <span style={{fontWeight:600, color:"#e53935"}}>
+          Всього дублікатів: {groups.reduce((sum, [, ps]) => sum + ps.length - 1, 0)}
+        </span>
+      </p>
       {groups.map(([art, products]) => (
         <div key={art} style={{marginBottom:20,border:"1px solid #e5e5e5",borderRadius:12,overflow:"hidden"}}>
           <div style={{padding:"10px 16px",background:"#f5f5f5",fontWeight:600,fontSize:13}}>
@@ -147,7 +152,12 @@ function ProductCard({ product, selected, onSelect, published, onDelete, onView 
       </div>
       <div className="pcard-body">
         <div className="pcard-top">
-          <span className="pcard-src" style={{background:SOURCE_COLORS[product.source]||"#888"}}>{SOURCE_LABELS[product.source]||product.source}</span>
+          <span className="pcard-src" style={{background:"transparent", padding:"2px 4px", display:"flex", alignItems:"center", gap:4}}>
+  {product.source === "telegram"
+    ? <img src="https://www.google.com/s2/favicons?domain=telegram.org&sz=64" style={{width:14,height:14,verticalAlign:"middle",borderRadius:2}}/>
+    : SOURCE_LABELS[product.source]||product.source}
+  <span style={{fontSize:11,color:"#888"}}>{(product.supplier_title||product.supplier||"").replace(/.*t\.me\//i,"").replace(/\//,"")}</span>
+</span>
           <span className="pcard-date">{product.post_date || (product.addedAt?new Date(product.addedAt).toLocaleDateString("uk-UA"):"")}</span>
         </div>
         <div className="pcard-name" onClick={()=>onView(product)} style={{cursor:"pointer"}}>{product.name}</div>
@@ -158,7 +168,7 @@ function ProductCard({ product, selected, onSelect, published, onDelete, onView 
         </div>
         {product.source_url
           ? <div className="pcard-supplier"><a href={product.source_url} target="_blank" rel="noreferrer" style={{color:"inherit",textDecoration:"none"}}>🔗 {product.source_url}</a></div>
-          : product.supplier&&<div className="pcard-supplier">📦 {product.supplier}</div>
+          : product.supplier&&<div className="pcard-supplier">📦 {product.supplier_title||product.supplier}</div>
         }
         <div className="pcard-actions">
           <button className="pcard-btn-view" onClick={()=>onView(product)}>👁 Переглянути</button>
@@ -199,7 +209,7 @@ function ProductViewModal({ product, onClose, onPublish, onDelete, published }) 
           )}
 
           <div className="grid2" style={{gap:8,marginBottom:12}}>
-            {[["Бренд",product.brand],["Ціна",product.price?`${product.price} грн`:"—"],["Розмір",product.size],["Колір",product.color],["Матеріал",product.material],["Стать",product.gender],["Стан",product.condition],["Категорія",product.category],["Постачальник",product.supplier],["Джерело",SOURCE_LABELS[product.source]||product.source],["Дата поста",product.post_date],["Посилання на пост",product.post_url]].filter(([,v])=>v).map(([l,v])=>(
+            {[["Бренд",product.brand],["Ціна",product.price?`${product.price} грн`:"—"],["Розмір",product.size],["Колір",product.color],["Матеріал",product.material],["Стать",product.gender],["Стан",product.condition],["Категорія",product.category],["Постачальник",product.supplier_title||product.supplier],["Джерело",SOURCE_LABELS[product.source]||product.source],["Дата поста",product.post_date],["Посилання на пост",product.post_url]].filter(([,v])=>v).map(([l,v])=>(
               <div key={l} style={{background:"var(--color-background-secondary)",borderRadius:6,padding:"6px 10px"}}>
                 <div style={{fontSize:11,color:"var(--color-text-secondary)",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.04em"}}>{l}</div>
                 {v?.startsWith("http") ? <a href={v} target="_blank" rel="noreferrer" style={{fontSize:13,color:"#4F46E5",wordBreak:"break-all"}}>{v}</a> : <div style={{fontSize:13}}>{v}</div>}
@@ -232,6 +242,13 @@ function ProductViewModal({ product, onClose, onPublish, onDelete, published }) 
 
 // ════════ FiltersBar ════════
 function FiltersBar({ filters, setFilters, products }) {
+  const supplierMap = useMemo(() => {
+    const m = {};
+    products.forEach(p => {
+      if (p.supplier) m[p.supplier] = p.supplier_title || p.supplier;
+    });
+    return m;
+  }, [products]);
   const suppliers  = useMemo(()=>[...new Set(products.map(p=>p.supplier).filter(Boolean))],[products]);
   const brands     = useMemo(()=>[...new Set(products.map(p=>p.brand).filter(Boolean))],[products]);
   const categories = useMemo(()=>[...new Set(products.map(p=>p.category).filter(Boolean))],[products]);
@@ -243,7 +260,7 @@ function FiltersBar({ filters, setFilters, products }) {
       <input className="filter-input" placeholder="Пошук за назвою або брендом..." value={filters.search} onChange={e=>set("search",e.target.value)}/>
       {[
         ["Джерело","source", Object.entries(SOURCE_LABELS).map(([k,v])=>({val:k,label:v}))],
-        ["Постачальник","supplier", suppliers.map(s=>({val:s,label:s}))],
+        ["Постачальник","supplier", suppliers.map(s=>({val:s,label:s.replace(/.*t\.me\//i,"").replace(/\//,"")||s}))],
         ["Бренд","brand", brands.map(b=>({val:b,label:b}))],
         ["Категорія","category", categories.map(c=>({val:c,label:c}))],
         ["Розмір","size", sizes.map(s=>({val:s,label:s}))],
@@ -618,9 +635,9 @@ export default function App() {
   const [toast, setToast]       = useState("");
   const [viewProduct, setViewProduct] = useState(null);
   const [sortOrder, setSortOrder] = useState("newest");
-const [disabledChannels, setDisabledChannels] = useState(() => {
-  try { return JSON.parse(localStorage.getItem("mp_disabled_channels") || "[]"); } catch { return []; }
-});
+  const [disabledChannels, setDisabledChannels] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("mp_disabled_channels") || "[]"); } catch { return []; }
+  });
 
   // Перевірка сервера
   useEffect(()=>{
@@ -643,8 +660,8 @@ const [disabledChannels, setDisabledChannels] = useState(() => {
     });
   },[pubV]);
 
-const filtered = useMemo(()=>allProducts.filter(p=>{
-  if (disabledChannels.some(ch => ch && (p.supplier?.includes(ch) || p.source_channel?.includes(ch) || p.channel?.includes(ch)))) return false;
+  const filtered = useMemo(()=>allProducts.filter(p=>{
+    if (disabledChannels.some(ch => ch && (p.supplier?.includes(ch) || p.source_channel?.includes(ch) || p.channel?.includes(ch)))) return false;
     const pub=isPublished(p);
     if(filters.showPublished && !pub) return false;
     if(!filters.showPublished && pub) return false;
@@ -735,7 +752,7 @@ const filtered = useMemo(()=>allProducts.filter(p=>{
           </div>
           <div className={`server-badge ${serverOnline?"online":"offline"}`}>
             {serverOnline?"🟢 Сервер працює":"🔴 Сервер вимкнено"}
-            {lastSync && <span style={{fontSize:11,opacity:.7,marginLeft:8}}>Синк: {new Date(lastSync).toLocaleString("uk-UA")}</span>}
+            {lastSync && <span style={{fontSize:11,opacity:.7,marginLeft:8}}>Синк: {new Date(lastSync).toLocaleDateString("uk-UA")} • {new Date(lastSync).toLocaleTimeString("uk-UA", {hour:"2-digit",minute:"2-digit",second:"2-digit"})}</span>}
           </div>
         </div>
       </header>
@@ -779,13 +796,13 @@ const filtered = useMemo(()=>allProducts.filter(p=>{
             </div>
             {activeCount===0&&<div className="info-box mb12">⚠️ Жоден маркетплейс не увімкнений. <button className="link-btn" onClick={()=>setView("markets")}>Перейти →</button></div>}
             {filtered.length===0
-              ?<div className="empty-state">
-  {filters.showPublished
-    ? <>😕 Опублікованих товарів немає.<br/>Спочатку опублікуйте товари зі стрічки.</>
-    : <>😕 Товарів не знайдено.<br/><button className="link-btn" onClick={()=>setView("sources")}>Додайте джерела даних →</button></>
-  }
-</div>
-              :<div className="feed-grid">{sorted.map(p=><ProductCard key={p.id} product={p} selected={selected.has(p.id)} onSelect={toggleSelect} published={isPublished(p)} onDelete={handleDelete} onView={setViewProduct}/>)}</div>
+              ? <div className="empty-state">
+                  {filters.showPublished
+                    ? <>😕 Опублікованих товарів немає.<br/>Спочатку опублікуйте товари зі стрічки.</>
+                    : <>😕 Товарів не знайдено.<br/><button className="link-btn" onClick={()=>setView("sources")}>Додайте джерела даних →</button></>
+                  }
+                </div>
+              : <div className="feed-grid">{sorted.map(p=><ProductCard key={p.id} product={p} selected={selected.has(p.id)} onSelect={toggleSelect} published={isPublished(p)} onDelete={handleDelete} onView={setViewProduct}/>)}</div>
             }
           </div>
         </div>
@@ -827,27 +844,27 @@ const filtered = useMemo(()=>allProducts.filter(p=>{
         <div className="card">
           <h2>📦 Результат публікації</h2>
           {generated.length===0
-            ?<div className="empty-state">Ще нічого не публікувалось.<br/>Поверніться до стрічки та оберіть товари.</div>
-            :<>
-              <p className="hint">Завантажте файли та завантажте на відповідні маркетплейси.</p>
-              {generated.map((g,i)=>(
-                <div key={i} className="result-block">
-                  <div className="result-header" style={{background:`${g.marketplace.color}18`}}>
-                    <div>
-                      <span className="market-name">{g.marketplace.name}</span>
-                      <span className="market-method ml8">· {g.product.name}</span>
-                      <span className="market-method ml8">.{g.format}</span>
+            ? <div className="empty-state">Ще нічого не публікувалось.<br/>Поверніться до стрічки та оберіть товари.</div>
+            : <>
+                <p className="hint">Завантажте файли та завантажте на відповідні маркетплейси.</p>
+                {generated.map((g,i)=>(
+                  <div key={i} className="result-block">
+                    <div className="result-header" style={{background:`${g.marketplace.color}18`}}>
+                      <div>
+                        <span className="market-name">{g.marketplace.name}</span>
+                        <span className="market-method ml8">· {g.product.name}</span>
+                        <span className="market-method ml8">.{g.format}</span>
+                      </div>
+                      <button className="btn-download" style={{background:g.marketplace.color}}
+                        onClick={()=>dlFile(g.content,`${g.marketplace.id}_${g.product.name.slice(0,20)}`,g.format)}>
+                        ⬇ Завантажити
+                      </button>
                     </div>
-                    <button className="btn-download" style={{background:g.marketplace.color}}
-                      onClick={()=>dlFile(g.content,`${g.marketplace.id}_${g.product.name.slice(0,20)}`,g.format)}>
-                      ⬇ Завантажити
-                    </button>
+                    <pre className="code-preview">{g.content}</pre>
                   </div>
-                  <pre className="code-preview">{g.content}</pre>
-                </div>
-              ))}
-              <button className="btn-secondary mt12" onClick={()=>setView("feed")}>← До стрічки</button>
-            </>
+                ))}
+                <button className="btn-secondary mt12" onClick={()=>setView("feed")}>← До стрічки</button>
+              </>
           }
         </div>
       )}

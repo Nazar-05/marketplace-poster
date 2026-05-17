@@ -43,6 +43,8 @@ def start_spinner(msg="📥 Завантаження фото"):
 
 _spinner_start = [0]
 _photos_downloaded = [0]
+import threading as _threading
+_sync_lock = _threading.Lock()
 
 def stop_spinner():
     _spinner_active[0] = False
@@ -394,8 +396,16 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                 else:
                     ch_name = ch.lstrip("@")
                 all_post_urls = []
+                ch_title = ch_name
+                try:
+                
+                    _title_resp = requests.get(f"https://t.me/s/{ch_name}", headers={"User-Agent":"Mozilla/5.0 (compatible; Googlebot/2.1)"}, timeout=10)
+                    _title_match = re.search(r'<div class="tgme_channel_info_header_title"[^>]*>(.*?)</div>', _title_resp.text)
+                    if _title_match:
+                        ch_title = re.sub(r"<[^>]+>", "", _title_match.group(1)).strip()
+                except:
+                    pass
                 page_url = f"https://t.me/s/{ch_name}"
-                pages_fetched = 0
                 _link_count = [0]
                 _collecting = [True]
                 def _spin_links():
@@ -497,6 +507,7 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                             p["name"] = "Без назви"
                         p["id"] = f"tg_{post_id}_{ch}"
                         p["supplier"] = ch
+                        p["supplier_title"] = ch_title
                         p["source_url"] = purl
                         p["post_url"] = purl
                         p["addedAt"] = datetime.now(timezone.utc).isoformat()
@@ -515,8 +526,17 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                     progress_file.write_text(json.dumps(sync_progress, ensure_ascii=False), encoding="utf-8")
                 channel_results[ch] = {"status": "ok", "count": ch_count, "links": len(all_post_urls)}
             except Exception as e:
-                log(f"⚠️ {ch}: {e}")
-                channel_results[ch] = {"status": "error", "message": str(e)}
+                err_map = {
+                    "cannot access local variable": "внутрішня помилка змінної",
+                    "Connection": "помилка з'єднання",
+                    "Timeout": "перевищено час очікування",
+                    "404": "канал не знайдено",
+                    "403": "доступ заборонено",
+                }
+                err_str = str(e)
+                ua_msg = next((v for k, v in err_map.items() if k in err_str), err_str)
+                log(f"⚠️ {ch}: {ua_msg}")
+                channel_results[ch] = {"status": "error", "message": ua_msg}
 
     elif source == "mydrop":
         token = get_env("MYDROP_TOKEN")
@@ -621,7 +641,8 @@ def sync_route(source):
     # Зберігаємо вимкнені канали щоб автосинк теж їх пропускав
     disabled_file = Path(__file__).parent.parent / "public" / "disabled_channels.json"
     disabled_file.write_text(json.dumps(disabled_channels, ensure_ascii=False), encoding="utf-8")
-    result = sync_source(source, disabled_channels=disabled_channels)
+    with _sync_lock:
+        result = sync_source(source, disabled_channels=disabled_channels)
     if "error" in result: return jsonify(result), 400
     extra = (result.get('disabled_info','') + result.get('private_info','')).strip(' |')
     suffix = f" | {extra}" if extra else ""
@@ -636,8 +657,8 @@ if __name__ == "__main__":
     print("")  # порожній рядок перед логами Flask
     log("🚀 Сервер запущено на http://localhost:5001")
     log(f"📁 Фото зберігаються в: {PHOTOS_DIR}")
-    log("💡 Залиш це вікно відкритим поки працюєш з додатком.\n")
-    log("✅ Сервер активний. Для зупинки натисни CTRL+C\n")
+    log("💡 Залиш це вікно відкритим поки працюєш з додатком.")
+    log("✅ Сервер активний. Для зупинки натисни CTRL+C")
     import threading
 
     def auto_sync_loop():
@@ -667,7 +688,8 @@ if __name__ == "__main__":
                 if disabled_file.exists():
                     try: disabled = json.loads(disabled_file.read_text(encoding="utf-8"))
                     except: disabled = []
-                result = sync_source("telegram", disabled_channels=disabled)
+                with _sync_lock:
+                    result = sync_source("telegram", disabled_channels=disabled)
                 extra = (result.get('disabled_info','') + result.get('private_info','')).strip(' |')
                 suffix = f" | {extra}" if extra else ""
                 total_links = sum(v.get('links',0) for v in result.get('channel_results',{}).values())
