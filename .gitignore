@@ -13,6 +13,11 @@ scripts/settings.json
 scripts/photos/
 scripts/*.session
 public/synced_products.json
+public/disabled_channels.json
+public/last_sync.json
+scripts/sync_progress.json
+scripts/pending_private_channels.json
+scripts/published.json
 
 # ── Build ─────────────────────────────────────────────────
 build/

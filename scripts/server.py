@@ -13,6 +13,7 @@ from pathlib import Path
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
+from urllib.parse import unquote, urlparse
 
 # Завантажуємо .env
 ENV_PATH = Path(__file__).parent / ".env"
@@ -61,6 +62,51 @@ logging.getLogger("werkzeug").addFilter(
 )
 PHOTOS_DIR = Path(__file__).parent / "photos"
 PHOTOS_DIR.mkdir(exist_ok=True)
+
+PUBLIC_DIR = Path(__file__).parent.parent / "public"
+SYNCED_PRODUCTS_FILE = PUBLIC_DIR / "synced_products.json"
+SYNC_PROGRESS_FILE = Path(__file__).parent / "sync_progress.json"
+
+def normalize_channel_key(value: str) -> str:
+    value = str(value or "").strip()
+    value = re.sub(r":(A|B|C|AUTO)$", "", value, flags=re.IGNORECASE)
+    value = value.replace("https://t.me/", "").replace("http://t.me/", "")
+    value = value.lstrip("@").strip("/")
+    if "/" in value:
+        value = value.split("/", 1)[0]
+    return value.lower()
+
+def product_matches_channel(product: dict, channel: str) -> bool:
+    target = normalize_channel_key(channel)
+    if not target:
+        return False
+    for field in ("supplier", "source_channel", "channel"):
+        if normalize_channel_key(product.get(field, "")) == target:
+            return True
+    for field in ("source_url", "post_url", "media_post_url", "text_post_url"):
+        raw = str(product.get(field, "") or "")
+        urls = [u.strip() for u in raw.split(",") if u.strip()]
+        if any(normalize_channel_key(u) == target for u in urls):
+            return True
+    return False
+
+def photo_filename_from_url(url: str) -> str | None:
+    path = unquote(urlparse(str(url or "").strip()).path)
+    filename = Path(path).name
+    if not filename or filename in (".", ".."):
+        return None
+    return filename
+
+def product_photo_filenames(product: dict) -> set[str]:
+    photos = product.get("photos", "")
+    if isinstance(photos, list):
+        items = photos
+    else:
+        items = str(photos or "").split(",")
+    return {
+        name for name in (photo_filename_from_url(item) for item in items)
+        if name
+    }
 
 # ── .env helpers ──────────────────────────────────────────
 def get_env(key, default=""):
@@ -317,7 +363,7 @@ def last_sync():
 
 @app.route("/synced-products")
 def get_synced_products():
-    products_file = Path(__file__).parent.parent / "public" / "synced_products.json"
+    products_file = SYNCED_PRODUCTS_FILE
     if not products_file.exists():
         return jsonify([])
     try:
@@ -326,11 +372,191 @@ def get_synced_products():
         return jsonify([])
 
 # ── Синхронізація джерел ──────────────────────────────────
+@app.route("/channels/reset", methods=["POST"])
+def reset_channel_data():
+    data = request.get_json() or {}
+    channel = str(data.get("channel", "") or "").strip()
+    target = normalize_channel_key(channel)
+    if not target:
+        return jsonify({"error": "channel is required"}), 400
+
+    with _sync_lock:
+        products = []
+        if SYNCED_PRODUCTS_FILE.exists():
+            try:
+                products = json.loads(SYNCED_PRODUCTS_FILE.read_text(encoding="utf-8"))
+            except:
+                products = []
+
+        removed = [p for p in products if product_matches_channel(p, channel)]
+        kept = [p for p in products if not product_matches_channel(p, channel)]
+
+        removed_photo_names = set()
+        for product in removed:
+            removed_photo_names.update(product_photo_filenames(product))
+
+        kept_photo_names = set()
+        for product in kept:
+            kept_photo_names.update(product_photo_filenames(product))
+
+        deleted_photos = 0
+        for filename in sorted(removed_photo_names - kept_photo_names):
+            photo_path = (PHOTOS_DIR / filename).resolve()
+            try:
+                if PHOTOS_DIR.resolve() in photo_path.parents and photo_path.exists():
+                    photo_path.unlink()
+                    deleted_photos += 1
+            except:
+                pass
+
+        SYNCED_PRODUCTS_FILE.write_text(
+            json.dumps(kept, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+
+        progress_removed = False
+        if SYNC_PROGRESS_FILE.exists():
+            try:
+                progress = json.loads(SYNC_PROGRESS_FILE.read_text(encoding="utf-8"))
+            except:
+                progress = {}
+            if isinstance(progress, dict):
+                next_progress = {
+                    key: val for key, val in progress.items()
+                    if normalize_channel_key(key) != target
+                }
+                progress_removed = len(next_progress) != len(progress)
+                SYNC_PROGRESS_FILE.write_text(
+                    json.dumps(next_progress, ensure_ascii=False, indent=2),
+                    encoding="utf-8"
+                )
+
+    return jsonify({
+        "ok": True,
+        "channel": channel,
+        "removed_products": len(removed),
+        "deleted_photos": deleted_photos,
+        "progress_removed": progress_removed,
+    })
+
 import sys, os
 sys.path.insert(0, str(Path(__file__).parent))
 
+def merge_pattern_products(products: list) -> list:
+    groups = {}
+    used = set()
+    replacements = {}
+
+    def post_num(p):
+        m = re.match(r"^tg_(\d+)_", p.get("id", ""))
+        return int(m.group(1)) if m else None
+
+    def has_photos(p):
+        return bool((p.get("photos") or "").strip())
+
+    def has_text(p):
+        return bool((p.get("description") or "").strip())
+
+    def pattern_of(p):
+        supplier = str(p.get("supplier", "")).strip()
+        m = re.search(r":(A|B|C|AUTO)$", supplier, flags=re.IGNORECASE)
+        return m.group(1).upper() if m else "AUTO"
+
+    def supplier_key(p):
+        return re.sub(r":(A|B|C|AUTO)$", "", str(p.get("supplier", "")).strip(), flags=re.IGNORECASE)
+
+    def merge_text_with_media(text, media_items):
+        merged = dict(text)
+        nums = [post_num(text)] + [post_num(m) for m in media_items]
+        nums = [n for n in nums if n is not None]
+        if nums:
+            merged["id"] = f"tg_{min(nums)}_{max(nums)}_{text.get('supplier')}"
+        photos = [p.strip() for p in (text.get("photos") or "").split(",") if p.strip()]
+        media_urls = []
+        for media in sorted(media_items, key=lambda p: post_num(p) or 0, reverse=True):
+            photos.extend([p.strip() for p in (media.get("photos") or "").split(",") if p.strip()])
+            media_url = media.get("post_url") or media.get("source_url", "")
+            if media_url:
+                media_urls.append(media_url)
+        merged["photos"] = ", ".join(dict.fromkeys(photos))
+        merged["media_post_url"] = ", ".join(media_urls)
+        merged["text_post_url"] = text.get("post_url") or text.get("source_url", "")
+        merged["source_url"] = text.get("source_url") or text.get("post_url", "")
+        merged["post_url"] = text.get("post_url") or text.get("source_url", "")
+        return merged
+
+    for idx, p in enumerate(products):
+        n = post_num(p)
+        if n is not None:
+            groups.setdefault((supplier_key(p), pattern_of(p)), []).append((idx, n, p))
+
+    def collect_media(ordered, start_pos, step):
+        media_items = []
+        media_indices = []
+        pos = start_pos + step
+        while 0 <= pos < len(ordered):
+            item_idx, _item_n, item = ordered[pos]
+            if item_idx in used or has_text(item):
+                break
+            if has_photos(item):
+                media_items.append(item)
+                media_indices.append(item_idx)
+            pos += step
+        return media_items, media_indices
+
+    def nearest_gap(text_num, media_items):
+        nums = [post_num(item) for item in media_items]
+        nums = [num for num in nums if num is not None]
+        return min((abs(text_num - num) for num in nums), default=10**9)
+
+    for (_supplier, pattern), items in groups.items():
+        if pattern == "C":
+            continue
+        ordered = sorted(items, key=lambda item: item[1], reverse=True)
+        for pos, (idx, _n, p) in enumerate(ordered):
+            if idx in used or not has_text(p):
+                continue
+            media_items, media_indices = [], []
+
+            if pattern == "A":
+                media_items, media_indices = collect_media(ordered, pos, 1)
+            elif pattern == "B":
+                media_items, media_indices = collect_media(ordered, pos, -1)
+            elif pattern == "AUTO":
+                a_items, a_indices = collect_media(ordered, pos, 1)
+                b_items, b_indices = collect_media(ordered, pos, -1)
+                if a_items and b_items:
+                    if nearest_gap(_n, b_items) < nearest_gap(_n, a_items):
+                        media_items, media_indices = b_items, b_indices
+                    else:
+                        media_items, media_indices = a_items, a_indices
+                elif a_items:
+                    media_items, media_indices = a_items, a_indices
+                elif b_items:
+                    media_items, media_indices = b_items, b_indices
+
+            if media_items:
+                replacements[idx] = merge_text_with_media(p, media_items)
+                used.update(media_indices)
+
+    result = []
+    for idx, p in enumerate(products):
+        if idx in replacements:
+            result.append(replacements[idx])
+        elif idx not in used:
+            result.append(p)
+    return result
+
+def merge_pattern_a_products(products: list) -> list:
+    return merge_pattern_products(products)
+
 def sync_source(source: str, disabled_channels: list = None) -> dict:
-    if disabled_channels is None:
+    # Завжди читаємо актуальний список вимкнених каналів з файлу
+    disabled_file = Path(__file__).parent.parent / "public" / "disabled_channels.json"
+    if disabled_file.exists():
+        try: disabled_channels = json.loads(disabled_file.read_text(encoding="utf-8"))
+        except: disabled_channels = []
+    else:
         disabled_channels = []
     """Отримує товари з джерела та зберігає у products.json"""
     _sync_start = datetime.now()
@@ -370,15 +596,33 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
         for ch in channels:
             ch_url = f"https://t.me/{ch.lstrip('@')}" if not ch.startswith("http") else ch
             # ВИПРАВЛЕНО: прибрано дублюючий if, правильний відступ блоку
-            if ch in disabled_channels or ch_url in disabled_channels:
+            def _strip(c): return re.sub(r':([ABCabc]|AUTO)$', '', c.strip(), flags=re.IGNORECASE)
+            def _norm(c):
+                c = re.sub(r':([ABCabc]|AUTO)$', '', c.strip(), flags=re.IGNORECASE)
+                c = c.replace("https://t.me/", "").replace("http://t.me/", "")
+                return c.lstrip("@").lower().strip("/")
+            is_private_link = "joinchat" in ch or "/+" in ch
+            is_plain_text = not ch.startswith("http") and not ch.startswith("@") and not re.match(r'^[a-zA-Z0-9_]{5,}$', ch)
+            if is_private_link or is_plain_text:
+                pending_file = Path(__file__).parent / "pending_private_channels.json"
+                pending = []
+                if pending_file.exists():
+                    try: pending = json.loads(pending_file.read_text(encoding="utf-8"))
+                    except: pending = []
+                if ch not in pending:
+                    pending.append(ch)
+                    pending_file.write_text(json.dumps(pending, ensure_ascii=False, indent=2), encoding="utf-8")
+                _private_skipped.append(ch)
+                continue
+            if _norm(ch) in [_norm(d) for d in disabled_channels] or _norm(ch_url) in [_norm(d) for d in disabled_channels]:
                 _disabled_skipped.append(ch)
                 continue
             url = f"https://t.me/{ch.lstrip('@')}" if not ch.startswith("http") else ch
             # Беремо останні 20 постів каналу
             try:
-                is_private_link = "joinchat" in ch or "/+" in ch
-                is_plain_text = not ch.startswith("http") and not ch.startswith("@") and not re.match(r'^[a-zA-Z0-9_]{5,}$', ch)
-                if is_private_link or is_plain_text:
+                if False:
+                    pass
+                if False:
                     # Зберігаємо в pending_private_channels.json
                     pending_file = Path(__file__).parent / "pending_private_channels.json"
                     pending = []
@@ -391,10 +635,15 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                     _private_skipped.append(ch)
                     continue
                 # Витягуємо username з повного URL якщо потрібно
+                def _strip_pat(c): return re.sub(r':([ABCabc]|AUTO)$', '', c.strip(), flags=re.IGNORECASE)
+                def _pattern(c):
+                    m = re.search(r':([ABCabc]|AUTO)$', c.strip(), flags=re.IGNORECASE)
+                    return m.group(1).upper() if m else "AUTO"
                 if ch.startswith("https://t.me/"):
-                    ch_name = ch.replace("https://t.me/", "").strip("/")
+                    ch_name = _strip_pat(ch.replace("https://t.me/", "").strip("/"))
                 else:
-                    ch_name = ch.lstrip("@")
+                    ch_name = _strip_pat(ch.lstrip("@"))
+                ch_pattern = _pattern(ch)
                 all_post_urls = []
                 ch_title = ch_name
                 try:
@@ -415,10 +664,10 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                         _elapsed = int((datetime.now() - _sync_start).total_seconds())
                         _mins, _secs = divmod(_elapsed, 60)
                         _t = f"{_mins}хв {_secs}с" if _mins else f"{_secs}с"
-                        print(f"\r  {sp} 🔗 Збираю посилання: {_link_count[0]} | ⏱ {_t}          ", end="", flush=True)
+                        print(f"\r  {sp} 🔗 Канал @{ch_name}: збираю посилання: {_link_count[0]} | ⏱ {_t}          ", end="", flush=True)
                         time.sleep(0.1)
                 existing_post_ids = {p.get("id") for p in existing}
-                last_synced_id = sync_progress.get(ch, {}).get("last_id")
+                last_synced_id = sync_progress.get(_norm(ch), {}).get("last_id") or sync_progress.get(ch, {}).get("last_id")
                 import threading
                 threading.Thread(target=_spin_links, daemon=True).start()
                 while page_url:
@@ -480,14 +729,67 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                         print(f"\r  {sp} 📄 Канал @{ch_name}: пост {_post_idx_ref[0]}/{total_posts} | 📥 фото: {_photos_downloaded[0]} | ⏱ {_t}          ", end="", flush=True)
                         time.sleep(0.1)
                 threading.Thread(target=_spin_posts, daemon=True).start()
-                for post_idx, purl in enumerate(post_urls, 1):
-                    _post_idx_ref[0] = post_idx
+                if ch_pattern == "A":
+                    post_urls = sorted(dict.fromkeys(post_urls), key=lambda u: int(u.split("/")[-1]))
+
+                fetched_posts = {}
+                def _get_post(purl):
+                    if purl not in fetched_posts:
+                        fetched_posts[purl] = fetch_telegram(purl)
+                    return fetched_posts[purl]
+
+                def _has_photos(p):
+                    return bool((p.get("photos") or "").strip())
+
+                def _has_text(p):
+                    return bool((p.get("description") or "").strip())
+
+                def _merge_media_text(media, media_url, text, text_url):
+                    merged = dict(text)
+                    merged["photos"] = media.get("photos", "")
+                    merged["media_post_url"] = media_url
+                    merged["text_post_url"] = text_url
+                    return merged
+
+                post_idx = 0
+                while post_idx < len(post_urls):
+                    purl = post_urls[post_idx]
+                    _post_idx_ref[0] = post_idx + 1
                     if stop_parsing:
                         break
                     post_id = purl.split('/')[-1]
                     if post_id in seen_ids:
+                        post_idx += 1
                         continue
-                    p = fetch_telegram(purl)
+                    p = _get_post(purl)
+                    product_id = post_id
+                    progress_id = post_id
+                    product_url = purl
+
+                    if False and ch_pattern == "A" and post_idx + 1 < len(post_urls):
+                        next_url = post_urls[post_idx + 1]
+                        next_id = next_url.split('/')[-1]
+                        next_p = _get_post(next_url)
+                        current_is_media = _has_photos(p) and not _has_text(p)
+                        next_is_text = _has_text(next_p)
+                        current_is_text = _has_text(p)
+                        next_is_media = _has_photos(next_p) and not _has_text(next_p)
+                        are_neighbors = int(next_id) == int(post_id) + 1
+                        if current_is_media and next_is_text and are_neighbors:
+                            p = _merge_media_text(p, purl, next_p, next_url)
+                            product_id = f"{post_id}_{next_id}"
+                            progress_id = next_id
+                            product_url = next_url
+                            seen_ids.add(next_id)
+                            post_idx += 1
+                        elif current_is_text and next_is_media and are_neighbors:
+                            p = _merge_media_text(next_p, next_url, p, purl)
+                            product_id = f"{post_id}_{next_id}"
+                            progress_id = next_id
+                            product_url = purl
+                            seen_ids.add(next_id)
+                            post_idx += 1
+
                     if p.get('error'):
                         print(f"\r{' ' * 80}\r", end="", flush=True)
                         log(f"  ⚠️ {purl}: {p.get('error','')[:80]}")
@@ -496,6 +798,7 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                         try:
                             post_dt = datetime.strptime(p["post_date"], "%d.%m.%Y").replace(tzinfo=timezone.utc)
                             if post_dt < DATE_FROM:
+                                post_idx += 1
                                 continue
                         except:
                             pass
@@ -505,26 +808,23 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                             p["name"] = first_line[:80] if first_line else "Без назви"
                         if not p.get("name"):
                             p["name"] = "Без назви"
-                        p["id"] = f"tg_{post_id}_{ch}"
+                        p["id"] = f"tg_{product_id}_{ch}"
                         p["supplier"] = ch
                         p["supplier_title"] = ch_title
-                        p["source_url"] = purl
-                        p["post_url"] = purl
+                        p["source_url"] = product_url
+                        p["post_url"] = product_url
                         p["addedAt"] = datetime.now(timezone.utc).isoformat()
                         new_products.append(p)
                         ch_count += 1
                         seen_ids.add(post_id)
                         # Зберігаємо прогрес
-                        sync_progress[ch] = {"last_id": post_id}
+                        sync_progress[_norm(ch)] = {"last_id": progress_id}
                         progress_file.write_text(json.dumps(sync_progress, ensure_ascii=False), encoding="utf-8")
+                    post_idx += 1
                 _processing[0] = False
                 import time; time.sleep(0.15)
                 print("\r" + " " * 80 + "\r", end="", flush=True)
-                # Якщо всі пости оброблені успішно — очищаємо прогрес для цього каналу
-                if ch in sync_progress and ch_count == len(post_urls):
-                    del sync_progress[ch]
-                    progress_file.write_text(json.dumps(sync_progress, ensure_ascii=False), encoding="utf-8")
-                channel_results[ch] = {"status": "ok", "count": ch_count, "links": len(all_post_urls)}
+                channel_results[_strip_pat(ch)] = {"status": "ok", "count": ch_count, "links": len(all_post_urls)}
             except Exception as e:
                 err_map = {
                     "cannot access local variable": "внутрішня помилка змінної",
@@ -537,6 +837,7 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
                 ua_msg = next((v for k, v in err_map.items() if k in err_str), err_str)
                 log(f"⚠️ {ch}: {ua_msg}")
                 channel_results[ch] = {"status": "error", "message": ua_msg}
+                channel_results[_strip_pat(ch)] = {"status": "error", "message": ua_msg}
 
     elif source == "mydrop":
         token = get_env("MYDROP_TOKEN")
@@ -586,6 +887,10 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
         except Exception as e:
             return {"error": str(e)}
 
+    if source == "telegram":
+        existing = merge_pattern_a_products(existing)
+        new_products = merge_pattern_a_products(new_products)
+
     # Фільтруємо нові (яких ще немає в existing та не опубліковані)
     existing_ids = {p.get("id") for p in existing}
     truly_new = [p for p in new_products if p.get("id") not in existing_ids]
@@ -616,7 +921,15 @@ def sync_source(source: str, disabled_channels: list = None) -> dict:
     disabled_info = f" | ⏩ вимкнених: {len(_disabled_skipped)}" if _disabled_skipped else ""
     private_info  = f" | ⚠️ приватних: {len(_private_skipped)}" if _private_skipped else ""
 
-    return {"total": len(new_products), "new_count": len(truly_new), "skipped": len(new_products)-len(truly_new), "channel_results": channel_results if source == "telegram" else {}, "disabled_info": disabled_info, "private_info": private_info}
+    return {"total": len(new_products), "new_count": len(truly_new), "skipped": len(new_products)-len(truly_new), "channel_results": channel_results if source == "telegram" else {}, "disabled_info": disabled_info, "private_info": private_info, "disabled_count": len(_disabled_skipped), "active_count": len(channel_results), "private_count": len(_private_skipped)}
+
+@app.route("/disabled-channels", methods=["POST"])
+def save_disabled_channels():
+    data = request.get_json() or {}
+    disabled = data.get("disabled_channels", [])
+    disabled_file = Path(__file__).parent.parent / "public" / "disabled_channels.json"
+    disabled_file.write_text(json.dumps(disabled, ensure_ascii=False), encoding="utf-8")
+    return jsonify({"ok": True})
 
 @app.route("/pending-private-channels", methods=["GET"])
 def get_pending_private():
@@ -648,7 +961,7 @@ def sync_route(source):
     suffix = f" | {extra}" if extra else ""
     total_links = sum(v.get('links',0) for v in result.get('channel_results',{}).values())
     print(f"\r{' ' * 80}\r", end="", flush=True)
-    log(f"✅ Синк: нових {result.get('new_count',0)} | дублів {result.get('skipped',0)} | перевірено: {result.get('total',0)} | 📥 фото: {_photos_downloaded[0]} | 🔗 посилань: {total_links}{suffix}")
+    log(f"✅ Синк: нових {result.get('new_count',0)} | дублів {result.get('skipped',0)} | вимкнених: {result.get('disabled_count',0)} | 📥 фото: {_photos_downloaded[0]} | 🔗 посилань: {total_links} | ✅ активних: {result.get('active_count',0)} | ❌ вимкнених: {result.get('disabled_count',0)} | ⏳ Очікує API: {result.get('private_count',0)}")
     return jsonify(result)
 
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
@@ -693,7 +1006,7 @@ if __name__ == "__main__":
                 extra = (result.get('disabled_info','') + result.get('private_info','')).strip(' |')
                 suffix = f" | {extra}" if extra else ""
                 total_links = sum(v.get('links',0) for v in result.get('channel_results',{}).values())
-                log(f"✅ Автосинк: нових {result.get('new_count',0)} | дублів {result.get('skipped',0)} | перевірено: {result.get('total',0)} | 📥 фото: {_photos_downloaded[0]} | 🔗 посилань: {total_links}{suffix}")
+                log(f"✅ Автосинк: нових {result.get('new_count',0)} | дублів {result.get('skipped',0)} | вимкнених: {result.get('disabled_count',0)} | 📥 фото: {_photos_downloaded[0]} | 🔗 посилань: {total_links} | ✅ активних: {result.get('active_count',0)} | ❌ вимкнених: {result.get('disabled_count',0)} | ⏳ Очікує API: {result.get('private_count',0)}")
             except Exception as e:
                 log(f"❌ Автосинк помилка: {e}")
             time.sleep(INTERVAL)

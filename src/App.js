@@ -25,7 +25,9 @@ const SOURCE_COLORS = { telegram:"#2AABEE",  mydrop:"#FF6B35", keycrm:"#4F46E5",
 
 // ── localStorage ─────────────────────────────────────────
 const LS_PUB = "mp_pub_v2", LS_MKT = "mp_mkt_v2", LS_MANUAL = "mp_manual";
-const LS_HIDDEN = "mp_hidden";
+const LS_HIDDEN = "mp_hidden", LS_VIEW = "mp_active_view";
+const VIEWS = new Set(["feed", "sources", "duplicates", "markets", "result", "settings"]);
+function getActiveView(){ const v = localStorage.getItem(LS_VIEW); return VIEWS.has(v) ? v : "feed"; }
 function getHidden(){ try{return new Set(JSON.parse(localStorage.getItem(LS_HIDDEN)||"[]"));}catch{return new Set();} }
 function saveHidden(s){ localStorage.setItem(LS_HIDDEN,JSON.stringify([...s])); }
 
@@ -723,10 +725,15 @@ function SettingsView({ serverOnline, onReset }) {
 
 // ════════ MAIN APP ════════
 export default function App() {
-  const [view, setView]         = useState("feed");
+  const [view, setView]         = useState(getActiveView);
   const [sourceDirty, setSourceDirty] = useState(false);
 
+  useEffect(() => {
+    localStorage.setItem(LS_VIEW, view);
+  }, [view]);
+
   function safeSetView(newView) {
+    console.log("safeSetView викликано з:", newView, new Error().stack);
     if (sourceDirty && newView !== "sources") {
       if (window.confirm("Є незбережені зміни. Покинути без збереження?")) {
         setSourceDirty(false);
@@ -831,7 +838,7 @@ export default function App() {
     const active=MARKETPLACES.filter(m=>enabled[m.id]&&!m.disabled);
     const gen=active.map(m=>{const{format,content}=generateOutput(product,m.id);return{product,marketplace:m,format,content};});
     markPublished(product,active.map(m=>m.id));
-    setGen(gen); setPubV(v=>v+1); setView("result");
+    setGen(gen); setSelected(new Set()); setPubV(v=>v+1); setView("result");
     setToast(`✓ Опубліковано "${product.name}"`);
   }
 
@@ -918,7 +925,7 @@ export default function App() {
         </div>
       )}
 
-      {view==="sources" && <SourcesView serverOnline={serverOnline} onProductsLoaded={()=>setPubV(v=>v+1)} onChannelToggle={()=>setDisabledChannels(JSON.parse(localStorage.getItem("mp_disabled_channels")||"[]"))} onDirtyChange={setSourceDirty}/>}
+      {view==="sources" && <SourcesView serverOnline={serverOnline} onProductsLoaded={()=>setPubV(v=>v+1)} onChannelToggle={()=>{ setDisabledChannels(JSON.parse(localStorage.getItem("mp_disabled_channels")||"[]")); }} onDirtyChange={(val)=>{ setSourceDirty(val); }}/>}
       {view==="duplicates" && <DuplicatesView allProducts={allProducts} onRefresh={()=>setPubV(v=>v+1)}/>}
 
       {view==="markets" && (

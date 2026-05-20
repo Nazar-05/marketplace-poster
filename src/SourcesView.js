@@ -16,6 +16,31 @@ const STATUS_LEGEND = [
   { emoji:"🔘", label:"Не синхронізовано",     desc:"Канал ще не перевірявся" },
 ];
 
+const PATTERN_OPTIONS = ["AUTO", "A", "B", "C"];
+
+// Прибирає паттерн з кінця рядка: "https://t.me/channel:A" → "https://t.me/channel"
+function stripPattern(ch) {
+  const parts = ch.trim().split(":");
+  const last = parts[parts.length - 1].toUpperCase();
+  if (["A", "B", "C", "AUTO"].includes(last)) {
+    parts.pop();
+    return parts.join(":");
+  }
+  return ch.trim();
+}
+
+// Витягує паттерн: "https://t.me/channel:A" → "A", або "" якщо немає
+function extractPattern(ch) {
+  const m = ch.match(/:([ABCabc]|AUTO|auto)$/i);
+  return m ? m[1].toUpperCase() : "";
+}
+
+// Нормалізує до @username для порівнянь і лічильників
+function toHandle(ch) {
+  const clean = stripPattern(ch);
+  return clean.replace(/https?:\/\/t\.me\//, "@").replace(/^(?!@)/, "@");
+}
+
 function StatusLegendPopover() {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -80,17 +105,8 @@ export default function SourcesView({ serverOnline, onProductsLoaded, onChannelT
   const [logs, setLogs]         = useState({});
   const [saved, setSaved]   = useState(false);
   const [dirty, setDirty]   = useState(false);
-
-  useEffect(() => {
-    const handler = (e) => {
-      if (dirty) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [dirty]);
+  const [deletingChannel, setDeletingChannel] = useState("");
+  const [openPatternMenu, setOpenPatternMenu] = useState(null);
   const [pendingPrivate, setPendingPrivate] = useState([]);
   const [disabledChannels, setDisabledChannels] = useState(() => {
     try { return JSON.parse(localStorage.getItem("mp_disabled_channels") || "[]"); } catch { return []; }
@@ -98,29 +114,50 @@ export default function SourcesView({ serverOnline, onProductsLoaded, onChannelT
   const [channelStatus, setChannelStatus] = useState(() => {
     try { return JSON.parse(localStorage.getItem("mp_channel_status") || "{}"); } catch { return {}; }
   });
+  const savedConfigRef = useRef(null);
 
-  function toggleChannel(ch) {
+  function normCh(ch) {
+  return stripPattern(ch).replace(/https?:\/\/t\.me\//, "").replace(/^@/, "").toLowerCase().trim().replace(/\/$/, "");
+}
+
+  function makeSavedConfig({ nextChannels = channels, nextTgMode = tgMode, nextDisabledChannels = disabledChannels } = {}) {
+    const normalizedDisabled = [...new Set(nextDisabledChannels.map(normCh).filter(Boolean))].sort();
+    return JSON.stringify({
+      telegram_mode: nextTgMode,
+      telegram_channels: nextChannels.filter(c => c.trim()).map(c => c.trim()),
+      disabled_channels: normalizedDisabled,
+    });
+  }
+
+  function updateDirty(nextState = {}) {
+    const changed = savedConfigRef.current !== makeSavedConfig(nextState);
+    setDirty(changed);
+    onDirtyChange?.(changed);
+  }
+
+function toggleChannel(ch) {
     setDisabledChannels(prev => {
-      const next = prev.includes(ch) ? prev.filter(c => c !== ch) : [...prev, ch];
-      localStorage.setItem("mp_disabled_channels", JSON.stringify(next));
-      if (onChannelToggle) onChannelToggle();
+      const next = prev.some(c => normCh(c) === normCh(ch)) ? prev.filter(c => normCh(c) !== normCh(ch)) : [...prev, stripPattern(ch)];
+      updateDirty({ nextDisabledChannels: next });
       return next;
     });
   }
 
   function getChannelStatus(ch) {
-    if (disabledChannels.includes(ch)) return "❌";
+    const key = stripPattern(ch);
+    if (disabledChannels.some(c => normCh(c) === normCh(ch))) return "❌";
     if (pendingPrivate.includes(ch))   return "⏳";
-    if (channelStatus[ch] === "ok")    return "✅";
-    if (channelStatus[ch] === "error") return "🛑";
+    if (channelStatus[ch] === "ok" || channelStatus[key] === "ok")    return "✅";
+    if (channelStatus[ch] === "error" || channelStatus[key] === "error") return "🛑";
     return "🔘";
   }
 
   function getChannelRowClass(ch) {
-    if (disabledChannels.includes(ch))      return "channel-row status-off";
-    if (pendingPrivate.includes(ch))        return "channel-row status-pending";
-    if (channelStatus[ch] === "ok")         return "channel-row status-ok";
-    if (channelStatus[ch] === "error")      return "channel-row status-error";
+    const key = stripPattern(ch);
+    if (disabledChannels.some(c => normCh(c) === normCh(ch)))               return "channel-row status-off";
+    if (pendingPrivate.includes(ch))                                         return "channel-row status-pending";
+    if (channelStatus[ch] === "ok"    || channelStatus[key] === "ok")        return "channel-row status-ok";
+    if (channelStatus[ch] === "error" || channelStatus[key] === "error")     return "channel-row status-error";
     return "channel-row status-unknown";
   }
 
@@ -135,9 +172,14 @@ export default function SourcesView({ serverOnline, onProductsLoaded, onChannelT
   useEffect(() => {
     if (!serverOnline) return;
     fetch(`${SERVER}/settings`).then(r => r.json()).then(d => {
+      const nextTgMode = d.telegram_mode || "public";
+      const nextChannels = d.telegram_channels?.length ? d.telegram_channels : [""];
       setSettings(d);
-      setTgMode(d.telegram_mode || "public");
-      setChannels(d.telegram_channels?.length ? d.telegram_channels : [""]);
+      setTgMode(nextTgMode);
+      setChannels(nextChannels);
+      savedConfigRef.current = makeSavedConfig({ nextChannels, nextTgMode });
+      setDirty(false);
+      onDirtyChange?.(false);
     }).catch(() => {});
   }, [serverOnline]);
 
@@ -151,18 +193,31 @@ export default function SourcesView({ serverOnline, onProductsLoaded, onChannelT
 
   async function save() {
     if (!serverOnline) return;
-    const chs = channels.filter(c => c.trim());
-    await fetch(`${SERVER}/settings`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...apiKeys, telegram_mode: tgMode, telegram_channels: chs }),
-    });
-    const fresh = await fetch(`${SERVER}/settings`).then(r => r.json());
-    setSettings(fresh);
-    setSaved(true);
     setDirty(false);
     onDirtyChange?.(false);
-    setTimeout(() => setSaved(false), 2500);
+    const chs = channels.filter(c => c.trim());
+    try {
+      await fetch(`${SERVER}/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...apiKeys, telegram_mode: tgMode, telegram_channels: chs }),
+      });
+      const fresh = await fetch(`${SERVER}/settings`).then(r => r.json());
+      localStorage.setItem("mp_disabled_channels", JSON.stringify(disabledChannels));
+      await fetch(`${SERVER}/disabled-channels`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ disabled_channels: disabledChannels }),
+      });
+      setSettings(fresh);
+      savedConfigRef.current = makeSavedConfig();
+      setSaved(true);
+      if (onChannelToggle) onChannelToggle();
+      setTimeout(() => setSaved(false), 2500);
+    } catch {
+      setDirty(true);
+      onDirtyChange?.(true);
+    }
   }
 
   async function sync(source) {
@@ -200,7 +255,7 @@ export default function SourcesView({ serverOnline, onProductsLoaded, onChannelT
           });
         }
         if (onProductsLoaded) onProductsLoaded();
-setReloadTick(t => t + 1);
+        setReloadTick(t => t + 1);
       }
     } catch {
       addLog(source, "❌ Сервер недоступний");
@@ -208,15 +263,77 @@ setReloadTick(t => t + 1);
     setSyncing(s => ({ ...s, [source]: false }));
   }
 
-  function setChannel(i, val) { const arr = [...channels]; arr[i] = val; setChannels(arr); setDirty(true); onDirtyChange?.(true); }
-  function addChannel()       { setChannels(c => [...c, ""]); setDirty(true); onDirtyChange?.(true); }
-  function removeChannel(i)   { setChannels(c => c.filter((_, idx) => idx !== i)); setDirty(true); onDirtyChange?.(true); }
+  async function resetChannelData(ch) {
+    const clean = stripPattern(ch).trim();
+    if (!serverOnline || !clean) return;
+    const count = getChannelCount(ch);
+    const ok = window.confirm(
+      `Видалити дані каналу ${clean}?\n\nБуде видалено ${count} товарів, локальні фото і прогрес синхронізації. Після цього канал можна синхронізувати заново.`
+    );
+    if (!ok) return;
+
+    setDeletingChannel(ch);
+    try {
+      const res = await fetch(`${SERVER}/channels/reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel: ch }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || "Reset failed");
+      setChannelStatus(prev => {
+        const next = { ...prev };
+        delete next[ch];
+        delete next[clean];
+        delete next[toHandle(ch)];
+        return next;
+      });
+      setReloadTick(t => t + 1);
+      onProductsLoaded?.();
+      window.alert(`Готово: видалено ${data.removed_products || 0} товарів і ${data.deleted_photos || 0} фото. Тепер можна синхронізувати канал заново.`);
+    } catch (err) {
+      window.alert("Не вдалося видалити дані каналу. Перевір, чи запущений сервер.");
+    } finally {
+      setDeletingChannel("");
+    }
+  }
+
+  function setChannel(i, val) {
+    const arr = [...channels];
+    arr[i] = val;
+    setChannels(arr);
+    updateDirty({ nextChannels: arr });
+  }
+  function addChannel() {
+    setChannels(c => {
+      const next = [...c, ""];
+      updateDirty({ nextChannels: next });
+      return next;
+    });
+  }
+  function removeChannel(i) {
+    setChannels(c => {
+      const next = c.filter((_, idx) => idx !== i);
+      updateDirty({ nextChannels: next });
+      return next;
+    });
+  }
+  function setTelegramMode(nextTgMode) {
+    setTgMode(nextTgMode);
+    updateDirty({ nextTgMode });
+  }
+
+  function setChannelPattern(i, nextPattern) {
+    setChannel(i, `${stripPattern(channels[i])}:${nextPattern}`);
+    setOpenPatternMenu(null);
+  }
 
   const hasKey = { mydrop: settings.has_mydrop_token, keycrm: settings.has_keycrm_key };
 
   const [allProducts, setAllProducts] = useState([]);
-const [reloadTick, setReloadTick] = useState(0);
-const [channelLastDates, setChannelLastDates] = useState({});
+  const [reloadTick, setReloadTick] = useState(0);
+  const [channelLastDates, setChannelLastDates] = useState({});
+
   useEffect(() => {
     Promise.all([
       fetch("/products.json").then(r=>r.json()).catch(()=>[]),
@@ -244,7 +361,18 @@ const [channelLastDates, setChannelLastDates] = useState({});
   }, [reloadTick]);
 
   function getChannelCount(ch) {
-    return allProducts.filter(p => p.supplier === ch || p.source_channel === ch || p.channel === ch).length;
+    const handle = toHandle(ch);
+    return allProducts.filter(p =>
+      p.supplier === handle || p.source_channel === handle || p.channel === handle ||
+      p.supplier === ch     || p.source_channel === ch     || p.channel === ch
+    ).length;
+  }
+
+  // Формує коректний URL для відкриття каналу в браузері (без паттерну)
+  function channelUrl(ch) {
+    const clean = stripPattern(ch).replace(/:([A-Za-z]+)$/, "").trim();
+    if (clean.startsWith("http")) return clean;
+    return `https://t.me/${clean.replace(/^@/, "")}`;
   }
 
   return (
@@ -254,7 +382,7 @@ const [channelLastDates, setChannelLastDates] = useState({});
           <h2 style={{ margin:0 }}>🔌 Джерела даних</h2>
           <StatusLegendPopover />
         </div>
-        <button className="btn-primary" onClick={save} disabled={!serverOnline || (!dirty && !saved)} style={{ fontSize:13, padding:"8px 16px", opacity: dirty ? 1 : 0.5 }}>
+        <button type="button" className="btn-primary" onClick={save} disabled={!serverOnline || (!dirty && !saved)} style={{ fontSize:13, padding:"8px 16px", opacity: dirty ? 1 : 0.5 }}>
           {saved ? "✓ Збережено!" : "💾 Зберегти"}
         </button>
       </div>
@@ -289,11 +417,11 @@ const [channelLastDates, setChannelLastDates] = useState({});
             <label className="field-label">Режим</label>
             <div className="radio-group">
               <label className="radio-label">
-                <input type="radio" name="tg" value="public" checked={tgMode==="public"} onChange={() => setTgMode("public")}/>
+                <input type="radio" name="tg" value="public" checked={tgMode==="public"} onChange={() => setTelegramMode("public")}/>
                 <span>Тільки публічні <span className="badge-green">Рекомендовано</span></span>
               </label>
               <label className="radio-label">
-                <input type="radio" name="tg" value="public_private" checked={tgMode==="public_private"} onChange={() => setTgMode("public_private")}/>
+                <input type="radio" name="tg" value="public_private" checked={tgMode==="public_private"} onChange={() => setTelegramMode("public_private")}/>
                 <span>Публічні + Приватні</span>
               </label>
             </div>
@@ -313,38 +441,131 @@ const [channelLastDates, setChannelLastDates] = useState({});
 
             <label className="field-label mt8">Канали постачальників</label>
             <div className="channel-list">
-              {channels.map((ch, i) => (
-                <div key={i} className={getChannelRowClass(ch)}>
-                  <span style={{fontSize:14,minWidth:20,textAlign:"center"}} title={
-                    disabledChannels.includes(ch) ? "Вимкнено" :
-                    pendingPrivate.includes(ch)   ? "Очікує API" :
-                    channelStatus[ch] === "ok"    ? "Синхронізовано" :
-                    channelStatus[ch] === "error" ? "Помилка синхронізації" : ""
-                  }>{getChannelStatus(ch)}</span>
-                  <input className="channel-input" value={ch} onChange={e => setChannel(i, e.target.value)}
-                    title={ch && getChannelCount(ch) > 0 ? `${getChannelCount(ch)} товарів` : ""}
-                    placeholder="@назва_каналу або https://t.me/назва"
-                    style={{opacity: disabledChannels.includes(ch) ? 0.4 : 1}}/>
-                  {ch && getChannelCount(ch) > 0 && (
-                    <span style={{fontSize:11,color:"#888",whiteSpace:"nowrap",flexShrink:0}}>
-                      {getChannelCount(ch)} шт
-                      {channelLastDates[ch] && <span style={{marginLeft:6,color:"#aaa"}}>· {channelLastDates[ch]}</span>}
-                    </span>
-                  )}
-                  <button
-                    title={disabledChannels.includes(ch) ? "Увімкнути канал" : "Вимкнути канал"}
-                    style={{background:"none",border:"none",cursor:"pointer",fontSize:14,opacity:0.6,padding:"0 2px"}}
-                    onClick={() => toggleChannel(ch)}>
-                    {disabledChannels.includes(ch) ? "▶" : "⏸"}
-                  </button>
-                  {channels.length > 1 && <button className="btn-remove-ch" onClick={() => removeChannel(i)}>✕</button>}
-                </div>
-              ))}
-              <button className="btn-add-channel" onClick={addChannel}>+ Додати канал</button>
+              {channels.map((ch, i) => {
+                const pattern = extractPattern(ch);
+                return (
+                  <div key={i} className={getChannelRowClass(ch)}>
+                    <span style={{fontSize:14,minWidth:20,textAlign:"center"}} title={
+                      disabledChannels.some(c => normCh(c) === normCh(ch)) ? "Вимкнено" :
+                      pendingPrivate.includes(ch)   ? "Очікує API" :
+                      channelStatus[ch] === "ok"    ? "Синхронізовано" :
+                      channelStatus[ch] === "error" ? "Помилка синхронізації" : ""
+                    }>{getChannelStatus(ch)}</span>
+
+                    <input
+                      className="channel-input"
+                      value={stripPattern(ch)}
+                      onChange={e => setChannel(i, e.target.value + (extractPattern(ch) ? ":" + extractPattern(ch) : ""))}
+                      title={ch && getChannelCount(ch) > 0 ? `${getChannelCount(ch)} товарів` : ""}
+                      placeholder="@назва_каналу або https://t.me/назва"
+                      style={{opacity: 1}}
+                    />
+
+                    {/* Дропдаун паттерну */}
+                    <div className="pattern-menu-wrap" onBlur={(e) => {
+                      if (!e.currentTarget.contains(e.relatedTarget)) setOpenPatternMenu(null);
+                    }}>
+                      <button
+                        type="button"
+                        className="pattern-menu-btn"
+                        title="Паттерн публікації"
+                        aria-haspopup="listbox"
+                        aria-expanded={openPatternMenu === i}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setOpenPatternMenu(openPatternMenu === i ? null : i);
+                        }}
+                      >
+                        <span>{pattern || "AUTO"}</span>
+                      </button>
+                      {openPatternMenu === i && (
+                        <div className="pattern-menu-list" role="listbox">
+                          {PATTERN_OPTIONS.map(opt => (
+                            <button
+                              key={opt}
+                              type="button"
+                              role="option"
+                              aria-selected={(pattern || "AUTO") === opt}
+                              className={`pattern-menu-option ${(pattern || "AUTO") === opt ? "active" : ""}`}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setChannelPattern(i, opt);
+                              }}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <select
+                      value={extractPattern(ch) || "AUTO"}
+                      onChange={e => { e.stopPropagation(); setChannel(i, stripPattern(ch) + ":" + e.target.value); }}
+                      title="Паттерн публікації"
+                      style={{
+                        display:"none", fontSize:10, fontWeight:700, color:"#6366f1",
+                        background:"#eef2ff", border:"none", borderRadius:4,
+                        padding:"1px 4px", flexShrink:0, cursor:"pointer",
+                      }}
+                    >
+                      <option value="AUTO">AUTO</option>
+                      <option value="A">A</option>
+                      <option value="B">B</option>
+                      <option value="C">C</option>
+                    </select>
+
+                    {/* Посилання на канал — відкривається БЕЗ паттерну */}
+                    {ch.trim() && (
+                      <a
+                        href={channelUrl(ch)}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Відкрити канал"
+                        style={{fontSize:13, color:"#888", textDecoration:"none", flexShrink:0, opacity:0.7}}
+                      >↗</a>
+                    )}
+
+                    {ch && getChannelCount(ch) > 0 && (
+                      <span style={{fontSize:11,color:"#888",whiteSpace:"nowrap",flexShrink:0}}>
+                        {getChannelCount(ch)} шт
+                        {channelLastDates[toHandle(ch)] && (
+                          <span style={{marginLeft:6,color:"#aaa"}}>· {channelLastDates[toHandle(ch)]}</span>
+                        )}
+                      </span>
+                    )}
+
+                    <button
+                      type="button"
+                      title={disabledChannels.some(c => normCh(c) === normCh(ch)) ? "Увімкнути канал" : "Вимкнути канал"}
+                      style={{background:"none",border:"none",cursor:"pointer",fontSize:14,opacity:0.6,padding:"0 2px"}}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleChannel(ch); }}>
+                      {disabledChannels.some(c => normCh(c) === normCh(ch)) ? "▶" : "⏸"}
+                    </button>
+                    {ch && getChannelCount(ch) > 0 && (
+                      <button
+                        type="button"
+                        title="Видалити дані каналу та прогрес синхронізації"
+                        aria-label="Видалити дані каналу та прогрес синхронізації"
+                        disabled={!serverOnline || deletingChannel === ch}
+                        style={{background:"none",border:"none",cursor:(!serverOnline || deletingChannel === ch) ? "not-allowed" : "pointer",display:"inline-flex",alignItems:"center",justifyContent:"center",width:18,height:18,opacity:(!serverOnline || deletingChannel === ch) ? 0.35 : 0.85,padding:0}}
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); resetChannelData(ch); }}>
+                        {deletingChannel === ch ? "..." : (
+                          <img src="/trash-emoji.png" alt="" aria-hidden="true" width="14" height="14" style={{display:"block"}} />
+                        )}
+                      </button>
+                    )}
+                    {channels.length > 1 && <button type="button" className="btn-remove-ch" onClick={(e) => { e.stopPropagation(); removeChannel(i); }}>✕</button>}
+                  </div>
+                );
+              })}
+              <button type="button" className="btn-add-channel" onClick={addChannel}>+ Додати канал</button>
             </div>
 
             <div className="source-actions">
-              <button className="btn-sync" disabled={!serverOnline || syncing.telegram || !channels.filter(c=>c.trim()).length}
+              <button type="button" className="btn-sync" disabled={!serverOnline || syncing.telegram || !channels.filter(c=>c.trim()).length}
                 onClick={() => sync("telegram")}>
                 {syncing.telegram ? "⏳ Синхронізую..." : "🔄 Синхронізувати"}
               </button>
@@ -383,7 +604,7 @@ const [channelLastDates, setChannelLastDates] = useState({});
               </div>
 
               <div className="source-actions">
-                <button className="btn-sync" disabled={!serverOnline || syncing[crm.id] || !hasKey[crm.id]}
+                <button type="button" className="btn-sync" disabled={!serverOnline || syncing[crm.id] || !hasKey[crm.id]}
                   onClick={() => sync(crm.id)}>
                   {syncing[crm.id] ? "⏳ Синхронізую..." : "🔄 Синхронізувати"}
                 </button>
