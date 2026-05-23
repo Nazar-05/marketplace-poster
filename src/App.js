@@ -26,8 +26,14 @@ const SOURCE_COLORS = { telegram:"#2AABEE",  mydrop:"#FF6B35", keycrm:"#4F46E5",
 // ── localStorage ─────────────────────────────────────────
 const LS_PUB = "mp_pub_v2", LS_MKT = "mp_mkt_v2", LS_MANUAL = "mp_manual";
 const LS_HIDDEN = "mp_hidden", LS_VIEW = "mp_active_view";
+const LS_THEME = "mp_theme";
 const VIEWS = new Set(["feed", "sources", "duplicates", "markets", "result", "settings"]);
 function getActiveView(){ const v = localStorage.getItem(LS_VIEW); return VIEWS.has(v) ? v : "feed"; }
+function getTheme(){
+  const saved = localStorage.getItem(LS_THEME);
+  if (saved === "light" || saved === "dark") return saved;
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
 function getHidden(){ try{return new Set(JSON.parse(localStorage.getItem(LS_HIDDEN)||"[]"));}catch{return new Set();} }
 function saveHidden(s){ localStorage.setItem(LS_HIDDEN,JSON.stringify([...s])); }
 
@@ -226,6 +232,10 @@ function ProductCard({ product, selected, onSelect, published, onDelete, onView 
   const photo = product.photos?.split(",")[0]?.trim();
   const pubInfo = published ? getPubInfo(product) : null;
   const pubDate = pubInfo?.at ? new Date(pubInfo.at).toLocaleDateString("uk-UA") : "";
+  const sourceTitle = (product.supplier_title||product.supplier||"").replace(/.*t\.me\//i,"").replace(/\//,"");
+  const sourceParts = sourceTitle.match(/^(\S+)\s+(.+)$/);
+  const sourceName = sourceParts ? sourceParts[1] : sourceTitle;
+  const sourceMeta = sourceParts ? sourceParts[2] : "";
 
   return (
     <div className={`pcard ${selected?"pcard-sel":""} ${published?"pcard-pub":""}`}>
@@ -236,27 +246,34 @@ function ProductCard({ product, selected, onSelect, published, onDelete, onView 
       </div>
       <div className="pcard-body" onClick={()=>onView(product)} style={{cursor:"pointer"}}>
         <div className="pcard-top">
-          <span className="pcard-src" style={{background:"transparent", padding:"2px 4px", display:"flex", alignItems:"center", gap:4}}>
-  {product.source === "telegram"
-    ? <img src="https://www.google.com/s2/favicons?domain=telegram.org&sz=64" style={{width:14,height:14,verticalAlign:"middle",borderRadius:2}}/>
-    : SOURCE_LABELS[product.source]||product.source}
-  <span style={{fontSize:11,color:"#888"}}>{(product.supplier_title||product.supplier||"").replace(/.*t\.me\//i,"").replace(/\//,"")}</span>
-</span>
+          <span className="pcard-src" style={{background:"transparent", padding:0}}>
+            {product.source === "telegram"
+              ? <img src="https://www.google.com/s2/favicons?domain=telegram.org&sz=64" alt="" className="pcard-src-icon"/>
+              : SOURCE_LABELS[product.source]||product.source}
+            <span className="pcard-src-name">{sourceName}</span>
+            {sourceMeta && <span className="pcard-src-meta">{sourceMeta}</span>}
+          </span>
           <span className="pcard-date">{product.post_date || (product.addedAt?new Date(product.addedAt).toLocaleDateString("uk-UA"):"")}</span>
         </div>
         <div className="pcard-name">{product.name}</div>
         <div className="pcard-brand">{product.brand}</div>
-        <div className="pcard-row">
-          <span className="pcard-price">{product.price?`${product.price} грн`:"—"}</span>
-          {product.size&&<span className="pcard-size">{product.size}</span>}
+        <div className="pcard-meta">
+          <div className="pcard-row">
+            <span className="pcard-price">{product.price?`${product.price} грн`:"—"}</span>
+            {product.size&&<span className="pcard-size">{product.size}</span>}
+          </div>
+          {product.source_url
+            ? <div className="pcard-supplier"><a href={product.source_url} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{color:"inherit",textDecoration:"none"}}>🔗 {product.source_url}</a></div>
+            : product.supplier&&<div className="pcard-supplier">📦 {product.supplier_title||product.supplier}</div>
+          }
         </div>
-        {product.source_url
-          ? <div className="pcard-supplier"><a href={product.source_url} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{color:"inherit",textDecoration:"none"}}>🔗 {product.source_url}</a></div>
-          : product.supplier&&<div className="pcard-supplier">📦 {product.supplier_title||product.supplier}</div>
-        }
         <div className="pcard-actions">
-          <button className="pcard-btn-view" onClick={e=>{e.stopPropagation();onView(product);}}>👁 Переглянути</button>
-          <button className="pcard-btn-del" onClick={e=>{e.stopPropagation();onDelete(product.id);}}>🗑</button>
+          <button className="pcard-btn-view" onClick={e=>{e.stopPropagation();onView(product);}}>
+            <img src="/eye-emoji.png" alt="" className="eye-icon" aria-hidden="true"/> Переглянути
+          </button>
+          <button className="pcard-btn-del" onClick={e=>{e.stopPropagation();onDelete(product.id);}} title="Видалити" aria-label="Видалити">
+            <img src="/trash-emoji.png" alt="" className="trash-icon" aria-hidden="true"/>
+          </button>
         </div>
       </div>
     </div>
@@ -337,7 +354,9 @@ function ProductViewModal({ product, onClose, onPublish, onDelete, published }) 
           )}
 
           <div className="row-btns">
-            <button className="btn-secondary" style={{color:"#c0392b",borderColor:"#c0392b"}} onClick={()=>{onDelete(product.id);onClose();}}>🗑 Видалити</button>
+            <button className="btn-secondary" style={{color:"#c0392b",borderColor:"#c0392b",display:"inline-flex",alignItems:"center",gap:6}} onClick={()=>{onDelete(product.id);onClose();}}>
+              <img src="/trash-emoji.png" alt="" className="trash-icon" aria-hidden="true"/> Видалити
+            </button>
             {!published && <button className="btn-primary" onClick={()=>{onPublish(product.id);onClose();}}>Публікувати →</button>}
           </div>
         </div>
@@ -715,7 +734,7 @@ function SettingsView({ serverOnline, onReset }) {
       </button>
 
       <div className="settings-section" style={{marginTop:24}}>
-        <h3 className="settings-title">🗑 Скинути публікації</h3>
+        <h3 className="settings-title"><img src="/trash-emoji.png" alt="" className="trash-icon" aria-hidden="true"/> Скинути публікації</h3>
         <p className="hint">Товари знову з'являться у стрічці як нові.</p>
         <ResetPublishedWidget onReset={onReset}/>
       </div>
@@ -726,11 +745,17 @@ function SettingsView({ serverOnline, onReset }) {
 // ════════ MAIN APP ════════
 export default function App() {
   const [view, setView]         = useState(getActiveView);
+  const [theme, setTheme]       = useState(getTheme);
   const [sourceDirty, setSourceDirty] = useState(false);
 
   useEffect(() => {
     localStorage.setItem(LS_VIEW, view);
   }, [view]);
+
+  useEffect(() => {
+    document.body.dataset.theme = theme;
+    localStorage.setItem(LS_THEME, theme);
+  }, [theme]);
 
   function safeSetView(newView) {
     console.log("safeSetView викликано з:", newView, new Error().stack);
@@ -825,12 +850,44 @@ export default function App() {
 
   function handleAdd(p){ const m=getManual(); m.push(p); saveManual(m); setAll(prev=>[...prev,p]); setToast(`✓ Товар "${p.name}" додано`); }
 
-  function handleDelete(id){
-    if(!window.confirm("Видалити товар?")) return;
-    const manual=getManual().filter(p=>p.id!==id); saveManual(manual);
+  async function handleDelete(id){
+    const product = allProducts.find(p => p.id === id);
+    if(!window.confirm("Видалити товар, запис поста та невикористані фото?")) return;
+
+    const manualBefore = getManual();
+    const manual = manualBefore.filter(p=>p.id!==id);
+    const isManual = manual.length !== manualBefore.length || product?.source === "manual";
+
+    if (!isManual) {
+      if (!serverOnline) {
+        window.alert("Сервер вимкнено. Щоб видалити товар із synced_products.json і фото, запусти python scripts/server.py");
+        return;
+      }
+      try {
+        const res = await fetch(`${SERVER}/synced-products/delete`, {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({id})
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(()=>({}));
+          throw new Error(data.error || "Не вдалося видалити товар на сервері");
+        }
+        const data = await res.json();
+        setToast(`Видалено товар і фото: ${data.deleted_photos || 0}`);
+      } catch (e) {
+        window.alert(e.message || "Не вдалося видалити товар");
+        return;
+      }
+    } else {
+      saveManual(manual);
+      setToast("Товар видалено");
+    }
+
+    if (product) clearPublished([makeKey(product)]);
     setAll(prev=>prev.filter(p=>p.id!==id));
     setSelected(s=>{const n=new Set(s);n.delete(id);return n;});
-    setToast("🗑 Товар видалено");
+    setViewProduct(p => p?.id === id ? null : p);
   }
 
   function handlePublishOne(id){
@@ -868,6 +925,20 @@ export default function App() {
             <span className="stat-badge">{newCount} нових</span>
             <span className="stat-badge stat-markets">{activeCount} маркетплейсів</span>
           </div>
+          <button
+            className="theme-toggle"
+            type="button"
+            onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}
+            aria-label={theme === "dark" ? "Увімкнути світлий режим" : "Увімкнути темний режим"}
+            title={theme === "dark" ? "Світлий режим" : "Темний режим"}
+          >
+            <img
+              className="theme-toggle-img"
+              src={theme === "dark" ? "/theme-toggle-dark.png" : "/theme-toggle-light.png"}
+              alt=""
+              aria-hidden="true"
+            />
+          </button>
           <div className={`server-badge ${serverOnline?"online":"offline"}`}>
             {serverOnline?"🟢 Сервер працює":"🔴 Сервер вимкнено"}
             {lastSync && <span style={{fontSize:11,opacity:.7,marginLeft:8}}>Синк: {new Date(lastSync).toLocaleDateString("uk-UA")} • {new Date(lastSync).toLocaleTimeString("uk-UA", {hour:"2-digit",minute:"2-digit",second:"2-digit"})}</span>}

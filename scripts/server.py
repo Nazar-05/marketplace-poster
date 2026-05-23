@@ -149,12 +149,23 @@ def download_photo(url: str, _counter: list = None) -> str | None:
         filename = f"{hashlib.md5(url.encode()).hexdigest()}{ext}"
         filepath = PHOTOS_DIR / filename
         if filepath.exists():
-            if _counter is not None:
-                _counter[0] += 1
-            return f"http://localhost:5001/photos/{filename}"
+            if filepath.stat().st_size <= 0:
+                filepath.unlink()
+            else:
+                if _counter is not None:
+                    _counter[0] += 1
+                return f"http://localhost:5001/photos/{filename}"
+
         with open(filepath, "wb") as f:
             for chunk in resp.iter_content(8192):
-                f.write(chunk)
+                if chunk:
+                    f.write(chunk)
+
+        if filepath.stat().st_size <= 0:
+            filepath.unlink(missing_ok=True)
+            log(f"⚠️ Порожнє фото, пропущено: {url}")
+            return None
+
         _photos_downloaded[0] += 1
 
         if _counter is not None:
@@ -372,6 +383,56 @@ def get_synced_products():
         return jsonify([])
 
 # ── Синхронізація джерел ──────────────────────────────────
+@app.route("/synced-products/delete", methods=["POST"])
+def delete_synced_product():
+    data = request.get_json() or {}
+    product_id = str(data.get("id", "") or "").strip()
+    if not product_id:
+        return jsonify({"error": "id is required"}), 400
+
+    with _sync_lock:
+        products = []
+        if SYNCED_PRODUCTS_FILE.exists():
+            try:
+                products = json.loads(SYNCED_PRODUCTS_FILE.read_text(encoding="utf-8"))
+            except:
+                products = []
+
+        removed = [p for p in products if str(p.get("id", "")) == product_id]
+        if not removed:
+            return jsonify({"removed_products": 0, "deleted_photos": 0}), 404
+
+        kept = [p for p in products if str(p.get("id", "")) != product_id]
+
+        kept_photo_names = set()
+        for product in kept:
+            kept_photo_names.update(product_photo_filenames(product))
+
+        removed_photo_names = set()
+        for product in removed:
+            removed_photo_names.update(product_photo_filenames(product))
+
+        deleted_photos = 0
+        photos_dir = PHOTOS_DIR.resolve()
+        for filename in sorted(removed_photo_names - kept_photo_names):
+            try:
+                photo_path = (PHOTOS_DIR / filename).resolve()
+                if photo_path.is_file() and photos_dir in photo_path.parents:
+                    photo_path.unlink()
+                    deleted_photos += 1
+            except:
+                pass
+
+        SYNCED_PRODUCTS_FILE.write_text(
+            json.dumps(kept, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+
+    return jsonify({
+        "removed_products": len(removed),
+        "deleted_photos": deleted_photos,
+    })
+
 @app.route("/channels/reset", methods=["POST"])
 def reset_channel_data():
     data = request.get_json() or {}
@@ -391,19 +452,20 @@ def reset_channel_data():
         removed = [p for p in products if product_matches_channel(p, channel)]
         kept = [p for p in products if not product_matches_channel(p, channel)]
 
-        removed_photo_names = set()
-        for product in removed:
-            removed_photo_names.update(product_photo_filenames(product))
-
         kept_photo_names = set()
         for product in kept:
             kept_photo_names.update(product_photo_filenames(product))
 
         deleted_photos = 0
-        for filename in sorted(removed_photo_names - kept_photo_names):
-            photo_path = (PHOTOS_DIR / filename).resolve()
+        photos_dir = PHOTOS_DIR.resolve()
+        for photo_path in sorted(PHOTOS_DIR.glob("*")):
             try:
-                if PHOTOS_DIR.resolve() in photo_path.parents and photo_path.exists():
+                photo_path = photo_path.resolve()
+                if (
+                    photo_path.is_file()
+                    and photos_dir in photo_path.parents
+                    and photo_path.name not in kept_photo_names
+                ):
                     photo_path.unlink()
                     deleted_photos += 1
             except:

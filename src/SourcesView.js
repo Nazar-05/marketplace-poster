@@ -375,6 +375,15 @@ function toggleChannel(ch) {
     return `https://t.me/${clean.replace(/^@/, "")}`;
   }
 
+  const telegramChannels = channels.filter(c => c.trim());
+  const disabledCount = telegramChannels.filter(ch =>
+    disabledChannels.some(c => normCh(c) === normCh(ch))
+  ).length;
+  const pendingCount = telegramChannels.filter(ch =>
+    pendingPrivate.some(c => c === ch || normCh(c) === normCh(ch))
+  ).length;
+  const activeCount = Math.max(telegramChannels.length - disabledCount - pendingCount, 0);
+
   return (
     <div className="card">
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
@@ -406,10 +415,17 @@ function toggleChannel(ch) {
             </span>
             <div className="source-info">
               <div className="source-name">Telegram канали</div>
-              <div className="source-meta">{channels.filter(c=>c.trim()).length} каналів додано</div>
+              <div className="source-meta">{telegramChannels.length} каналів додано</div>
+              {telegramChannels.length > 0 && (
+                <div className="source-channel-summary">
+                  <span>✅ активних: {activeCount}</span>
+                  <span>❌ вимкнених: {disabledCount}</span>
+                  <span>⏳ Очікує API: {pendingCount}</span>
+                </div>
+              )}
             </div>
-            <span className={`source-status ${channels.filter(c=>c.trim()).length ? "ok" : "off"}`}>
-              {channels.filter(c=>c.trim()).length ? "✓ Активно" : "Не налаштовано"}
+            <span className={`source-status ${telegramChannels.length ? "ok" : "off"}`}>
+              {telegramChannels.length ? "✓ Активно" : "Не налаштовано"}
             </span>
           </div>
 
@@ -540,7 +556,7 @@ function toggleChannel(ch) {
                     <button
                       type="button"
                       title={disabledChannels.some(c => normCh(c) === normCh(ch)) ? "Увімкнути канал" : "Вимкнути канал"}
-                      style={{background:"none",border:"none",cursor:"pointer",fontSize:14,opacity:0.6,padding:"0 2px"}}
+                      style={{background:"none",border:"none",cursor:"pointer",fontSize:14,color:"#666",padding:"0 2px"}}
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleChannel(ch); }}>
                       {disabledChannels.some(c => normCh(c) === normCh(ch)) ? "▶" : "⏸"}
                     </button>
@@ -629,12 +645,12 @@ function toggleChannel(ch) {
           <p style={{fontSize:12,color:"#aaa",marginTop:8}}>
             Переключи режим на <b>Публічні + Приватні</b>, введи API ключі — і ці канали запрацюють автоматично.
           </p>
-          <button style={{fontSize:12,color:"#aaa",background:"none",border:"none",cursor:"pointer",marginTop:4}}
+          <button style={{fontSize:12,color:"#aaa",background:"none",border:"none",cursor:"pointer",marginTop:4,display:"inline-flex",alignItems:"center",gap:5}}
             onClick={() => {
               fetch(`${SERVER}/pending-private-channels/clear`, {method:"POST"});
               setPendingPrivate([]);
             }}>
-            🗑 Очистити список
+            <img src="/trash-emoji.png" alt="" className="trash-icon" aria-hidden="true"/> Очистити список
           </button>
         </div>
       )}
