@@ -144,21 +144,23 @@ function toggleChannel(ch) {
   }
 
   function getChannelStatus(ch) {
-    const key = stripPattern(ch);
-    if (disabledChannels.some(c => normCh(c) === normCh(ch))) return "❌";
-    if (pendingPrivate.includes(ch))   return "⏳";
-    if (channelStatus[ch] === "ok" || channelStatus[key] === "ok")    return "✅";
-    if (channelStatus[ch] === "error" || channelStatus[key] === "error") return "🛑";
-    return "🔘";
+    const norm = normCh(ch);
+    if (disabledChannels.some(c => normCh(c) === norm)) return "❌";
+    if (pendingPrivate.some(c => normCh(c) === norm)) return "⏳";
+    const match = (v) => Object.entries(channelStatus).some(([k, s]) => normCh(k) === norm && s === v);
+    if (match("ok")) return "✅";
+    if (match("error")) return "🛑";
+    return "✅";
   }
 
   function getChannelRowClass(ch) {
-    const key = stripPattern(ch);
-    if (disabledChannels.some(c => normCh(c) === normCh(ch)))               return "channel-row status-off";
-    if (pendingPrivate.includes(ch))                                         return "channel-row status-pending";
-    if (channelStatus[ch] === "ok"    || channelStatus[key] === "ok")        return "channel-row status-ok";
-    if (channelStatus[ch] === "error" || channelStatus[key] === "error")     return "channel-row status-error";
-    return "channel-row status-unknown";
+    const norm = normCh(ch);
+    if (disabledChannels.some(c => normCh(c) === norm)) return "channel-row status-off";
+    if (pendingPrivate.some(c => normCh(c) === norm)) return "channel-row status-pending";
+    const match = (v) => Object.entries(channelStatus).some(([k, s]) => normCh(k) === norm && s === v);
+    if (match("ok")) return "channel-row status-ok";
+    if (match("error")) return "channel-row status-error";
+    return "channel-row status-ok";
   }
 
   useEffect(() => {
@@ -244,12 +246,17 @@ function toggleChannel(ch) {
       } else {
         addLog(source, `✅ Отримано: ${data.total} товарів`);
         addLog(source, `🆕 Нових: ${data.new_count}`);
-        addLog(source, `🔁 Дублікатів пропущено: ${data.skipped}`);
+        addLog(source, `↪️ Пропущено вже існуючих: ${data.skipped}`);
         if (source === "telegram" && data.channel_results) {
           setChannelStatus(prev => {
             const next = {...prev};
             Object.entries(data.channel_results).forEach(([ch, res]) => {
+              // Зберігаємо під кількома варіантами ключа для надійного пошуку
+              const normalized = normCh(ch);
+              const withAt = "@" + normalized;
               next[ch] = res.status;
+              next[normalized] = res.status;
+              next[withAt] = res.status;
             });
             return next;
           });

@@ -8,8 +8,11 @@ API docs: https://help.keycrm.app/uk/api
 """
 
 import requests
-import json
-from deduplication import filter_new, mark_as_published, show_stats
+
+try:
+    from scripts.deduplication import filter_new, log, show_stats
+except ModuleNotFoundError:
+    from deduplication import filter_new, log, show_stats
 
 KEYCRM_BASE = "https://openapi.keycrm.app/v1"
 KEYCRM_KEY  = "ВАШ_API_КЛЮЧ_ТУТ"

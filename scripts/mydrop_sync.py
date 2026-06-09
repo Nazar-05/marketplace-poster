@@ -8,8 +8,11 @@ API docs: https://api.mydrop.com.ua/
 """
 
 import requests
-import json
-from deduplication import filter_new, mark_as_published, show_stats
+
+try:
+    from scripts.deduplication import filter_new, log, show_stats
+except ModuleNotFoundError:
+    from deduplication import filter_new, log, show_stats
 
 MYDROP_BASE  = "https://backend.mydrop.com.ua/api"
 MYDROP_TOKEN = "ВАШ_API_ТОКЕН_ТУТ"

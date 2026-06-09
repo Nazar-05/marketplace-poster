@@ -15,6 +15,10 @@ from datetime import datetime
 DB_PATH = Path(__file__).parent / "published.json"
 
 
+def log(message: str):
+    print(message)
+
+
 def _load_db() -> dict:
     if DB_PATH.exists():
         with open(DB_PATH, "r", encoding="utf-8") as f:

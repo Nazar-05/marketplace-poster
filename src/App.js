@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+﻿import { useState, useEffect, useMemo, useCallback } from "react";
 import "./App.css";
 import PhotoManager from "./PhotoManager";
 import SourcesView from "./SourcesView";
 import SortDropdown from "./SortDropdown";
+import ArchiveView from "./ArchiveView";
 function decodeHtml(str) {
   const txt = document.createElement("textarea");
   txt.innerHTML = str;
@@ -10,6 +11,41 @@ function decodeHtml(str) {
 }
 
 const SERVER = "http://localhost:5001";
+
+function loadArchiveKeywords() {
+  return fetch(`${SERVER}/archive-keywords`)
+    .then(r => r.json())
+    .catch(() => fetch("/archive_keywords.json").then(r => r.json()).catch(() => ({})))
+    .then(data => (data && typeof data === "object" && !Array.isArray(data)) ? data : {});
+}
+
+function productMatchesArchiveRules(product, keywordsDict) {
+  if (!product || !keywordsDict || typeof keywordsDict !== "object") return false;
+
+  const channelKeys = [
+    product.supplier,
+    product.source_channel,
+    product.channel,
+  ].map(v => String(v || "").trim()).filter(Boolean);
+
+  const keywords = channelKeys.flatMap(key => Array.isArray(keywordsDict[key]) ? keywordsDict[key] : []);
+  if (!keywords.length) return false;
+
+  const text = [
+  product.name,
+  product.description,
+  product.text,
+  product.post_text,
+  product.postText,
+  product.raw_text,
+  product.rawText,
+  ].map(v => String(v || "")).join(" ").toLowerCase();
+
+  return keywords.some(kw => {
+    const needle = String(kw || "").trim().toLowerCase();
+    return needle && text.includes(needle);
+  });
+}
 
 const MARKETPLACES = [
   { id:"rozetka", name:"Rozetka",     link:"https://rozetka.com.ua",  logo:"https://www.google.com/s2/favicons?domain=rozetka.com.ua&sz=64", color:"#00a046", method:"REST API", photoReq:"1280×1280, білий фон" },
@@ -22,12 +58,23 @@ const MARKETPLACES = [
 
 const SOURCE_LABELS = { telegram:"Telegram", mydrop:"MyDrop", keycrm:"KeyCRM", manual:"Вручну" };
 const SOURCE_COLORS = { telegram:"#2AABEE",  mydrop:"#FF6B35", keycrm:"#4F46E5", manual:"#888" };
+const supplierDisplayName = (value = "") => (
+  String(value)
+    .replace(/.*t\.me\//i, "")
+    .replace(/\/$/, "")
+    .replace(/:(A|B|C|AUTO)$/i, "")
+) || value;
+const filterDisplayValue = (key, value) => {
+  if (key === "source") return SOURCE_LABELS[value] || value;
+  if (key === "supplier") return supplierDisplayName(value);
+  return value;
+};
 
 // ── localStorage ─────────────────────────────────────────
 const LS_PUB = "mp_pub_v2", LS_MKT = "mp_mkt_v2", LS_MANUAL = "mp_manual";
 const LS_HIDDEN = "mp_hidden", LS_VIEW = "mp_active_view";
 const LS_THEME = "mp_theme";
-const VIEWS = new Set(["feed", "sources", "duplicates", "markets", "result", "settings"]);
+const VIEWS = new Set(["feed", "sources", "duplicates", "markets", "result", "settings", "archive"]);
 function getActiveView(){ const v = localStorage.getItem(LS_VIEW); return VIEWS.has(v) ? v : "feed"; }
 function getTheme(){
   const saved = localStorage.getItem(LS_THEME);
@@ -64,7 +111,7 @@ function generateOutput(product, id) {
 function dlFile(content,name,fmt){ const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([content],{type:"text/plain;charset=utf-8"})); a.download=`${name}.${fmt}`; a.click(); }
 
 const emptyProduct = {id:"",sku:"",name:"",brand:"",price:"",size:"",color:"",material:"",gender:"Жіноче",condition:"Нове",category:"",photos:"",description:"",source:"manual",supplier:"",addedAt:new Date().toISOString()};
-const defaultFilters = {search:"",source:"",supplier:"",brand:"",category:"",size:"",gender:"",priceMin:"",priceMax:"",dateFrom:"",dateTo:"",showPublished:false};
+const defaultFilters = {search:"",source:[],supplier:[],brand:[],category:[],color:[],size:[],gender:[],priceMin:"",priceMax:"",dateFrom:"",dateTo:"",showPublished:false};
 
 // ════════ Lightbox ════════
 function Lightbox({ images, startIndex, onClose }) {
@@ -205,10 +252,10 @@ function DuplicatesView({ allProducts, onRefresh }) {
                     {isHidden && <span style={{fontSize:10,background:"#e5e5e5",color:"#666",padding:"2px 6px",borderRadius:4,marginBottom:4,display:"inline-block"}}>Прихований</span>}
                     <div style={{fontSize:12,fontWeight:600,marginBottom:2,lineHeight:1.3}}>{p.name}</div>
                     <div style={{fontSize:11,color:"#aaa",marginBottom:4}}>{p.post_date}</div>
-                    {p.post_url && <a href={p.post_url} target="_blank" rel="noreferrer" style={{fontSize:11,color:"#4f46e5"}}>🔗 Пост</a>}
+                    {p.post_url && <a href={p.post_url} target="_blank" rel="noreferrer" style={{fontSize:11,color:"#4f46e5"}}>&#128279; &#1055;&#1086;&#1089;&#1090;</a>}
                     <div style={{display:"flex",gap:4,marginTop:6}}>
-                      {idx!==0 && !isHidden && <button className="btn-sm" style={{fontSize:11,padding:"3px 8px",color:"#e53935",borderColor:"#e53935"}} onClick={()=>hideProduct(p.id)}>Приховати</button>}
-                      {isHidden && <button className="btn-sm" style={{fontSize:11,padding:"3px 8px"}} onClick={()=>restoreProduct(p.id)}>↩ Повернути</button>}
+                      {idx!==0 && !isHidden && <button className="btn-sm" style={{fontSize:11,padding:"3px 8px",color:"#e53935",borderColor:"#e53935"}} onClick={()=>hideProduct(p.id)}>&#1055;&#1088;&#1080;&#1093;&#1086;&#1074;&#1072;&#1090;&#1080;</button>}
+                      {isHidden && <button className="btn-sm" style={{fontSize:11,padding:"3px 8px"}} onClick={()=>restoreProduct(p.id)}>&darr; &#1055;&#1086;&#1074;&#1077;&#1088;&#1085;&#1091;&#1090;&#1080;</button>}
                     </div>
                   </div>
                 </div>
@@ -228,20 +275,22 @@ function Toast({ msg, onClose }) {
 }
 
 // ════════ ProductCard ════════
-function ProductCard({ product, selected, onSelect, published, onDelete, onView }) {
+function ProductCard({ product, selected, onSelect, published, onDelete, onView, archived }) {
   const photo = product.photos?.split(",")[0]?.trim();
   const pubInfo = published ? getPubInfo(product) : null;
   const pubDate = pubInfo?.at ? new Date(pubInfo.at).toLocaleDateString("uk-UA") : "";
-  const sourceTitle = (product.supplier_title||product.supplier||"").replace(/.*t\.me\//i,"").replace(/\//,"");
+  const sourceTitle = supplierDisplayName(product.supplier_title||product.supplier||"");
   const sourceParts = sourceTitle.match(/^(\S+)\s+(.+)$/);
   const sourceName = sourceParts ? sourceParts[1] : sourceTitle;
   const sourceMeta = sourceParts ? sourceParts[2] : "";
 
   return (
-    <div className={`pcard ${selected?"pcard-sel":""} ${published?"pcard-pub":""}`}>
+    <div className={`pcard ${selected?"pcard-sel":""} ${published?"pcard-pub":""} ${archived?"pcard-archived":""}`}>
       <div className="pcard-img-wrap" onClick={()=>onSelect(product.id)}>
         {photo ? <img src={photo} alt={product.name} className="pcard-img" onError={e=>e.target.style.display="none"}/> : <div className="pcard-no-img">📷</div>}
+        {(() => { const cnt = (product.photos||"").split(",").filter(s=>s.trim()).length; return cnt > 1 ? <div className="pcard-photo-count">{cnt}</div> : null; })()}
         {published && <div className="pcard-pub-overlay">✓ Опубліковано<br/><span style={{fontSize:10,opacity:.85}}>{pubDate}</span></div>}
+        {archived && <div className="pcard-archived-overlay">📦 Архів</div>}
         <div className={`pcard-check ${selected?"checked":""}`}>{selected?"✓":""}</div>
       </div>
       <div className="pcard-body" onClick={()=>onView(product)} style={{cursor:"pointer"}}>
@@ -264,7 +313,7 @@ function ProductCard({ product, selected, onSelect, published, onDelete, onView 
           </div>
           {product.source_url
             ? <div className="pcard-supplier"><a href={product.source_url} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{color:"inherit",textDecoration:"none"}}>🔗 {product.source_url}</a></div>
-            : product.supplier&&<div className="pcard-supplier">📦 {product.supplier_title||product.supplier}</div>
+            : product.supplier&&<div className="pcard-supplier">📦 {supplierDisplayName(product.supplier_title||product.supplier)}</div>
           }
         </div>
         <div className="pcard-actions">
@@ -281,15 +330,42 @@ function ProductCard({ product, selected, onSelect, published, onDelete, onView 
 }
 
 // ════════ ProductViewModal ════════
-function ProductViewModal({ product, onClose, onPublish, onDelete, published }) {
+function ProductViewModal({ product, onClose, onPublish, onDelete, published, onPrev, onNext, hasPrev, hasNext, onArchive, archived }) {
   const photos = (product.photos||"").split(",").map(p=>p.trim()).filter(Boolean);
   const [photoIdx, setPhotoIdx] = useState(0);
   const [lightboxIdx, setLightboxIdx] = useState(null); // null = закрито
   const pubInfo = published ? getPubInfo(product) : null;
 
+  useEffect(() => {
+    const handler = e => {
+      if (lightboxIdx !== null) return;
+      if (e.key === "ArrowLeft")  onPrev?.();
+      if (e.key === "ArrowRight") onNext?.();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [lightboxIdx, onPrev, onNext]);
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{maxWidth:600,width:"95%"}} onClick={e=>e.stopPropagation()}>
+      <div className="post-nav-shell" onClick={e=>e.stopPropagation()}>
+        {hasPrev && (
+          <button
+            className="post-nav-btn post-nav-prev"
+            onClick={e=>{e.stopPropagation();onPrev();}}
+            aria-label="Попередній товар"
+            type="button"
+          />
+        )}
+        {hasNext && (
+          <button
+            className="post-nav-btn post-nav-next"
+            onClick={e=>{e.stopPropagation();onNext();}}
+            aria-label="Наступний товар"
+            type="button"
+          />
+        )}
+        <div className="modal" style={{width:"100%"}}>
         <div className="modal-header">
           <h3 style={{fontSize:16}}>{product.name||"Без назви"}</h3>
           <button className="modal-close" onClick={onClose}>✕</button>
@@ -332,7 +408,7 @@ function ProductViewModal({ product, onClose, onPublish, onDelete, published }) 
           )}
 
           <div className="grid2" style={{gap:8,marginBottom:12}}>
-            {[["Бренд",product.brand],["Ціна",product.price?`${product.price} грн`:"—"],["Розмір",product.size],["Колір",product.color],["Матеріал",product.material],["Стать",product.gender],["Стан",product.condition],["Категорія",product.category],["Постачальник",product.supplier_title||product.supplier],["Джерело",SOURCE_LABELS[product.source]||product.source],["Дата поста",product.post_date],["Посилання на пост",product.post_url]].filter(([,v])=>v).map(([l,v])=>(
+            {[["Бренд",product.brand],["Ціна",product.price?`${product.price} грн`:"—"],["Розмір",product.size],["Колір",product.color],["Матеріал",product.material],["Стать",product.gender],["Стан",product.condition],["Категорія",product.category],["Постачальник",supplierDisplayName(product.supplier_title||product.supplier)],["Джерело",SOURCE_LABELS[product.source]||product.source],["Дата поста",product.post_date],["Посилання на пост",product.post_url]].filter(([,v])=>v).map(([l,v])=>(
               <div key={l} style={{background:"var(--color-background-secondary)",borderRadius:6,padding:"6px 10px"}}>
                 <div style={{fontSize:11,color:"var(--color-text-secondary)",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.04em"}}>{l}</div>
                 {v?.startsWith("http") ? <a href={v} target="_blank" rel="noreferrer" style={{fontSize:13,color:"#4F46E5",wordBreak:"break-all"}}>{v}</a> : <div style={{fontSize:13}}>{v}</div>}
@@ -357,9 +433,18 @@ function ProductViewModal({ product, onClose, onPublish, onDelete, published }) 
             <button className="btn-secondary" style={{color:"#c0392b",borderColor:"#c0392b",display:"inline-flex",alignItems:"center",gap:6}} onClick={()=>{onDelete(product.id);onClose();}}>
               <img src="/trash-emoji.png" alt="" className="trash-icon" aria-hidden="true"/> Видалити
             </button>
+            {onArchive && (
+              <button
+                className="btn-secondary"
+                style={{color:"#7c3aed",borderColor:"#7c3aed",display:"inline-flex",alignItems:"center",gap:6}}
+                onClick={()=>{onArchive(product.id, !archived);onClose();}}>
+                {archived ? "↩️ Розархівувати" : "📦 В архів"}
+              </button>
+            )}
             {!published && <button className="btn-primary" onClick={()=>{onPublish(product.id);onClose();}}>Публікувати →</button>}
           </div>
         </div>
+      </div>
       </div>
 
       {/* Lightbox — рендеримо поза модалкою щоб перекрити все */}
@@ -369,6 +454,54 @@ function ProductViewModal({ product, onClose, onPublish, onDelete, published }) 
           startIndex={lightboxIdx}
           onClose={() => setLightboxIdx(null)}
         />
+      )}
+    </div>
+  );
+}
+
+// ════════ MultiSelect ════════
+function MultiSelect({ label, filterKey, options, filters, setFilters, openKey, setOpenKey }) {
+  const open = openKey === filterKey;
+  const selected = filters[filterKey] || [];
+  const optionLabels = useMemo(() => Object.fromEntries(options.map(o => [o.val, o.label])), [options]);
+  const toggle = (val) => {
+    const next = selected.includes(val) ? selected.filter(v=>v!==val) : [...selected, val];
+    setFilters(f => ({...f, [filterKey]: next}));
+  };
+  const label_text = selected.length === 0 ? "Всі" : selected.length === 1 ? (optionLabels[selected[0]] || filterDisplayValue(filterKey, selected[0])) : `${selected.length} обрано`;
+  return (
+    <div style={{position:"relative"}}>
+      <label className="filter-label">{label}</label>
+      <div className="filter-select" style={{cursor:"pointer",userSelect:"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}
+        onClick={()=>setOpenKey(open ? null : filterKey)}>
+        <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"85%"}}>{label_text}</span>
+        <span style={{fontSize:10,opacity:.5}}>{open?"▲":"▼"}</span>
+      </div>
+      {open && (
+        <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:100,background:"var(--color-surface)",border:"1.5px solid var(--color-border)",borderRadius:8,boxShadow:"0 4px 16px rgba(0,0,0,.12)",maxHeight:200,overflowY:"auto"}}>
+          {selected.length > 0 && (
+            <div style={{padding:"6px 10px",borderBottom:"1px solid var(--color-border-tertiary)"}}>
+              <button style={{fontSize:11,color:"#4f46e5",background:"none",border:"none",cursor:"pointer",padding:0}} onClick={()=>setFilters(f=>({...f,[filterKey]:[]}))}>Скинути вибір</button>
+            </div>
+          )}
+          {options.map(o=>(
+            <label key={o.val} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",cursor:"pointer",fontSize:12,background:selected.includes(o.val)?"var(--color-background-secondary)":"transparent"}}>
+              <input type="checkbox" checked={selected.includes(o.val)} onChange={()=>toggle(o.val)} style={{flexShrink:0}}/>
+              <span style={{flex:1,minWidth:0}}>{o.label}</span>
+              {o.count !== undefined && (
+                <span style={{
+                  fontSize:11, padding:"1px 7px", borderRadius:10, flexShrink:0,
+                  background: selected.includes(o.val) ? "#ede9fe" : "var(--color-background-secondary)",
+                  color: selected.includes(o.val) ? "#5b21b6" : "var(--color-text-secondary)",
+                  border: selected.includes(o.val) ? "0.5px solid #c4b5fd" : "0.5px solid var(--color-border-tertiary)",
+                  opacity: o.count === 0 ? 0.4 : 1,
+                }}>
+                  {o.count}
+                </span>
+              )}
+            </label>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -387,27 +520,70 @@ function FiltersBar({ filters, setFilters, products }) {
   const brands     = useMemo(()=>[...new Set(products.map(p=>p.brand).filter(Boolean))],[products]);
   const categories = useMemo(()=>[...new Set(products.map(p=>p.category).filter(Boolean))],[products]);
   const sizes      = useMemo(()=>[...new Set(products.flatMap(p=>(p.size||"").split(",").map(s=>s.trim())).filter(Boolean))],[products]);
+
+  const counts = useMemo(() => {
+    function filterExcept(excludeKey) {
+      return products.filter(p => {
+        if(filters.search && !`${p.name} ${p.brand} ${p.description||""}`.toLowerCase().includes(filters.search.toLowerCase())) return false;
+        if(excludeKey !== "source"   && filters.source?.length   && !filters.source.includes(p.source))     return false;
+        if(excludeKey !== "supplier" && filters.supplier?.length && !filters.supplier.includes(p.supplier)) return false;
+        if(excludeKey !== "brand"    && filters.brand?.length    && !filters.brand.includes(p.brand))       return false;
+        if(excludeKey !== "category" && filters.category?.length && !filters.category.includes(p.category)) return false;
+        if(excludeKey !== "gender"   && filters.gender?.length   && !filters.gender.includes(p.gender))     return false;
+        if(excludeKey !== "color"    && filters.color?.length    && !filters.color.some(c=>(p.color||"").split(",").map(s=>s.trim()).includes(c))) return false;
+        if(excludeKey !== "size"     && filters.size?.length     && !filters.size.some(s=>(p.size||"").includes(s))) return false;
+        if(filters.priceMin && +p.price < +filters.priceMin) return false;
+        if(filters.priceMax && +p.price > +filters.priceMax) return false;
+        return true;
+      });
+    }
+    function tally(arr, key) {
+      const m = {};
+      arr.forEach(p => { if(p[key]) m[p[key]] = (m[p[key]]||0)+1; });
+      return m;
+    }
+    function tallyMulti(arr, key) {
+      const m = {};
+      arr.forEach(p => { (p[key]||"").split(",").map(s=>s.trim()).filter(Boolean).forEach(v=>{ m[v]=(m[v]||0)+1; }); });
+      return m;
+    }
+    return {
+      source:   tally(filterExcept("source"),   "source"),
+      supplier: tally(filterExcept("supplier"), "supplier"),
+      brand:    tally(filterExcept("brand"),    "brand"),
+      category: tally(filterExcept("category"), "category"),
+      gender:   tally(filterExcept("gender"),   "gender"),
+      color:    tallyMulti(filterExcept("color"), "color"),
+      size:     tallyMulti(filterExcept("size"),  "size"),
+    };
+  }, [products, filters]);
+  const [openKey, setOpenKey] = useState(null);
   const set=(k,v)=>setFilters(f=>({...f,[k]:v}));
   return (
     <div className="filters">
-      <div className="filters-title">🔍 Фільтри</div>
+      <div className="filters-scroll">
+      <div className="filters-title" style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <span>🔍 Фільтри</span>
+        <button
+          className={`pub-toggle-btn ${filters.showPublished?"active":""}`}
+          onClick={()=>setFilters(f=>({...f,showPublished:!f.showPublished}))}
+        >{filters.showPublished ? "Не опубліковані" : "Опубліковані"}</button>
+      </div>
       <input className="filter-input" placeholder="Пошук за назвою або брендом..." value={filters.search} onChange={e=>set("search",e.target.value)}/>
-      {[
-        ["Джерело","source", Object.entries(SOURCE_LABELS).map(([k,v])=>({val:k,label:v}))],
-        ["Постачальник","supplier", suppliers.map(s=>({val:s,label:s.replace(/.*t\.me\//i,"").replace(/\//,"")||s}))],
-        ["Бренд","brand", brands.map(b=>({val:b,label:b}))],
-        ["Категорія","category", categories.map(c=>({val:c,label:c}))],
-        ["Розмір","size", sizes.map(s=>({val:s,label:s}))],
-        ["Стать","gender", [{val:"Жіноче",label:"Жіноче"},{val:"Чоловіче",label:"Чоловіче"},{val:"Унісекс",label:"Унісекс"},{val:"Дитяче",label:"Дитяче"}]],
-      ].map(([label,key,opts])=>(
-        <div key={key}>
-          <label className="filter-label">{label}</label>
-          <select className="filter-select" value={filters[key]} onChange={e=>set(key,e.target.value)}>
-            <option value="">Всі</option>
-            {opts.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}
-          </select>
-        </div>
-      ))}
+      <MultiSelect label="Джерело" filterKey="source" filters={filters} setFilters={setFilters} openKey={openKey} setOpenKey={setOpenKey}
+        options={Object.entries(SOURCE_LABELS).map(([k,v])=>({val:k,label:v,count:counts.source[k]||0}))}/>
+      <MultiSelect label="Постачальник" filterKey="supplier" filters={filters} setFilters={setFilters} openKey={openKey} setOpenKey={setOpenKey}
+        options={suppliers.map(s=>({val:s,label:supplierDisplayName(s),count:counts.supplier[s]||0}))}/>
+      <MultiSelect label="Бренд" filterKey="brand" filters={filters} setFilters={setFilters} openKey={openKey} setOpenKey={setOpenKey}
+        options={brands.map(b=>({val:b,label:b,count:counts.brand[b]||0}))}/>
+      <MultiSelect label="Категорія" filterKey="category" filters={filters} setFilters={setFilters} openKey={openKey} setOpenKey={setOpenKey}
+        options={categories.map(c=>({val:c,label:c,count:counts.category[c]||0}))}/>
+      <MultiSelect label="Колір" filterKey="color" filters={filters} setFilters={setFilters} openKey={openKey} setOpenKey={setOpenKey}
+        options={[...new Set(products.flatMap(p=>(p.color||"").split(",").map(s=>s.trim())).filter(Boolean))].sort().map(c=>({val:c,label:c,count:counts.color[c]||0}))}/>
+      <MultiSelect label="Розмір" filterKey="size" filters={filters} setFilters={setFilters} openKey={openKey} setOpenKey={setOpenKey}
+        options={sizes.map(s=>({val:s,label:s,count:counts.size[s]||0}))}/>
+      <MultiSelect label="Стать" filterKey="gender" filters={filters} setFilters={setFilters} openKey={openKey} setOpenKey={setOpenKey}
+        options={[{val:"Жіноче",label:"Жіноче"},{val:"Чоловіче",label:"Чоловіче"},{val:"Унісекс",label:"Унісекс"},{val:"Дитяче",label:"Дитяче"}].map(o=>({...o,count:counts.gender[o.val]||0}))}/>
       <label className="filter-label">Ціна від — до (грн)</label>
       <div className="filter-row">
         <input className="filter-input filter-half" type="number" placeholder="від" value={filters.priceMin} onChange={e=>set("priceMin",e.target.value)}/>
@@ -417,6 +593,7 @@ function FiltersBar({ filters, setFilters, products }) {
       <input className="filter-input" type="date" value={filters.dateFrom} onChange={e=>set("dateFrom",e.target.value)}/>
       <label className="filter-label">Дата до</label>
       <input className="filter-input" type="date" value={filters.dateTo} onChange={e=>set("dateTo",e.target.value)}/>
+      </div>
       <button className="filter-reset" onClick={()=>setFilters(defaultFilters)}>Скинути фільтри</button>
     </div>
   );
@@ -780,6 +957,7 @@ export default function App() {
   const [toast, setToast]       = useState("");
   const [viewProduct, setViewProduct] = useState(null);
   const [sortOrder, setSortOrder] = useState("newest");
+  const [archiveKeywords, setArchiveKeywords] = useState({});
   const [disabledChannels, setDisabledChannels] = useState(() => {
     try { return JSON.parse(localStorage.getItem("mp_disabled_channels") || "[]"); } catch { return []; }
   });
@@ -795,26 +973,31 @@ export default function App() {
     Promise.all([
       fetch("/products.json").then(r=>r.json()).catch(()=>[]),
       fetch(`${SERVER}/synced-products`).then(r=>r.json()).catch(()=>[]),
-    ]).then(([base, synced]) => {
+      loadArchiveKeywords(),
+    ]).then(([base, synced, archiveData]) => {
       const manual = getManual();
       const all = [...base, ...synced, ...manual];
       const unique = Array.from(new Map(all.map(p=>[p.id||Math.random(),p])).values());
+      setArchiveKeywords(archiveData);
       setAll(unique);
     });
   },[pubV]);
 
   const filtered = useMemo(()=>allProducts.filter(p=>{
     if (disabledChannels.some(ch => ch && (p.supplier?.includes(ch) || p.source_channel?.includes(ch) || p.channel?.includes(ch)))) return false;
+    // Фільтруємо архівні пости за замовчуванням
+    if (p.archived || productMatchesArchiveRules(p, archiveKeywords)) return false;
     const pub=isPublished(p);
     if(filters.showPublished && !pub) return false;
     if(!filters.showPublished && pub) return false;
-    if(filters.search&&!`${p.name} ${p.brand}`.toLowerCase().includes(filters.search.toLowerCase())) return false;
-    if(filters.source   &&p.source   !==filters.source)   return false;
-    if(filters.supplier &&p.supplier !==filters.supplier)  return false;
-    if(filters.brand    &&p.brand    !==filters.brand)     return false;
-    if(filters.category &&p.category !==filters.category)  return false;
-    if(filters.gender   &&p.gender   !==filters.gender)    return false;
-    if(filters.size     &&!p.size?.includes(filters.size)) return false;
+    if(filters.search&&!`${p.name} ${p.brand} ${p.description||""}`.toLowerCase().includes(filters.search.toLowerCase())) return false;
+    if(filters.source?.length   && !filters.source.includes(p.source))     return false;
+    if(filters.supplier?.length && !filters.supplier.includes(p.supplier)) return false;
+    if(filters.brand?.length    && !filters.brand.includes(p.brand))       return false;
+    if(filters.category?.length && !filters.category.includes(p.category)) return false;
+    if(filters.gender?.length   && !filters.gender.includes(p.gender))     return false;
+    if(filters.color?.length && !filters.color.some(c=>(p.color||"").split(",").map(s=>s.trim()).includes(c))) return false;
+    if(filters.size?.length  && !filters.size.some(s=>(p.size||"").includes(s))) return false;
     if(filters.priceMin &&+p.price<+filters.priceMin)      return false;
     if(filters.priceMax &&+p.price>+filters.priceMax)      return false;
     const itemDate = p.post_date
@@ -823,7 +1006,7 @@ export default function App() {
     if(filters.dateFrom && itemDate < filters.dateFrom) return false;
     if(filters.dateTo   && itemDate > filters.dateTo)   return false;
     return true;
-  }),[allProducts,filters,pubV,disabledChannels]);
+  }),[allProducts,filters,pubV,disabledChannels,archiveKeywords]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -908,8 +1091,50 @@ export default function App() {
     setToast(`✓ Опубліковано ${toPublish.length} товарів на ${active.length} маркетплейсах`);
   }
 
+  async function handleArchive(productId, archived) {
+    if (!serverOnline) {
+      alert("Сервер не запущено. Запусти: python scripts/server.py");
+      return;
+    }
+    try {
+      const res = await fetch(`${SERVER}/archive-product`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: productId, archived })
+      });
+      if (!res.ok) throw new Error("Помилка архівування");
+      setAll(prev => prev.map(p => p.id === productId ? { ...p, archived } : p));
+      setToast(archived ? "✓ Переміщено в архів" : "✓ Розархівовано");
+    } catch (e) {
+      alert("Не вдалося архівувати товар");
+    }
+  }
+
   const activeCount=MARKETPLACES.filter(m=>enabled[m.id]&&!m.disabled).length;
-  const newCount=allProducts.filter(p=>!isPublished(p)).length;
+  const newCount = allProducts.filter(p =>
+  !isPublished(p) && !p.archived && !productMatchesArchiveRules(p, archiveKeywords)
+).length;
+
+// Рахунок постів по кожному ключовому слову
+const archiveKeywordCounts = useMemo(() => {
+  const result = {};
+  Object.entries(archiveKeywords).forEach(([channel, keywords]) => {
+    if (!result[channel]) result[channel] = {};
+    (keywords || []).forEach(kw => {
+      const needle = String(kw || "").trim().toLowerCase();
+      if (!needle) return;
+      result[channel][kw] = allProducts.filter(p => {
+        const channelKeys = [p.supplier, p.source_channel, p.channel]
+          .map(v => String(v || "").trim()).filter(Boolean);
+        if (!channelKeys.includes(channel)) return false;
+        const text = [p.name, p.description, p.text, p.post_text, p.postText, p.raw_text, p.rawText]
+          .map(v => String(v || "")).join(" ").toLowerCase();
+        return text.includes(needle);
+      }).length;
+    });
+  });
+  return result;
+}, [allProducts, archiveKeywords]);
 
   return (
     <div className="app">
@@ -920,10 +1145,19 @@ export default function App() {
           <h1>🛍 Постинг товарів на маркетплейси</h1>
           <p className="subtitle">Одяг та взуття · Telegram / CRM → Маркетплейси</p>
         </div>
-        <div className="header-right">
-          <div className="header-stats">
-            <span className="stat-badge">{newCount} нових</span>
-            <span className="stat-badge stat-markets">{activeCount} маркетплейсів</span>
+        <div className="header-right" style={{display:"flex",alignItems:"center",gap:12,flexWrap:"nowrap"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,border:"1px solid #7c3aed",borderRadius:8,padding:"4px 10px"}}>
+            <span style={{fontSize:13,color:"#5b21b6"}}>📦 {newCount} товарів</span>
+            <span style={{color:"#7c3aed",fontSize:14}}>•</span>
+            <span style={{fontSize:13,color:"#5b21b6"}}>🏪 {activeCount} маркетплейсів</span>
+            <span style={{color:"#7c3aed",fontSize:14}}>•</span>
+            <span style={{fontSize:13,color:"#5b21b6"}}>{serverOnline?"🟢 Сервер працює":"🔴 Сервер вимкнено"}</span>
+            {lastSync && (
+              <span style={{display:"flex",flexDirection:"column",alignItems:"flex-end",lineHeight:1.2}}>
+                <span style={{fontSize:12,fontWeight:500,color:"#5b21b6"}}>{new Date(lastSync).toLocaleTimeString("uk-UA", {hour:"2-digit",minute:"2-digit"})}</span>
+                <span style={{fontSize:10,opacity:.6}}>{new Date(lastSync).toLocaleDateString("uk-UA")}</span>
+              </span>
+            )}
           </div>
           <button
             className="theme-toggle"
@@ -939,15 +1173,11 @@ export default function App() {
               aria-hidden="true"
             />
           </button>
-          <div className={`server-badge ${serverOnline?"online":"offline"}`}>
-            {serverOnline?"🟢 Сервер працює":"🔴 Сервер вимкнено"}
-            {lastSync && <span style={{fontSize:11,opacity:.7,marginLeft:8}}>Синк: {new Date(lastSync).toLocaleDateString("uk-UA")} • {new Date(lastSync).toLocaleTimeString("uk-UA", {hour:"2-digit",minute:"2-digit",second:"2-digit"})}</span>}
-          </div>
         </div>
       </header>
 
       <nav className="nav">
-        {[["feed","📋 Стрічка"],["sources","🔌 Джерела"],["duplicates","🔁 Дублікати"],["markets","🛒 Маркетплейси"],["result","📦 Результат"],["settings","⚙️ Налаштування"]].map(([v,l])=>(
+        {[["feed","📋 Стрічка"],["sources","🔌 Джерела"],["duplicates","🔁 Дублікати"],["archive","📦 Архів"],["markets","🛒 Маркетплейси"],["result","📦 Результат"],["settings","⚙️ Налаштування"]].map(([v,l])=>(
           <button key={v} className={`nav-btn ${view===v?"active":""}`} onClick={()=>safeSetView(v)}>{l}</button>
         ))}
       </nav>
@@ -958,17 +1188,40 @@ export default function App() {
           <div className="feed-main">
             <div className="feed-toolbar">
               <div className="feed-toolbar-left">
+                <SortDropdown value={sortOrder} onChange={setSortOrder} />
+                <div style={{width:"0.5px",height:18,background:"var(--color-border-secondary)"}}/>
                 <button className="btn-sm" onClick={selectAll}>Вибрати всі</button>
                 <button className="btn-sm" onClick={clearSel}>Скинути</button>
                 <span className="sel-count">{selected.size>0?`Вибрано: ${selected.size}`:`${filtered.length} товарів`}</span>
-                <SortDropdown value={sortOrder} onChange={setSortOrder} />
-                <button
-                  className="btn-sm"
-                  style={filters.showPublished ? {background:"#4F46E5",color:"#fff",borderColor:"#4F46E5"} : {}}
-                  onClick={()=>setFilters(f=>({...f,showPublished:!f.showPublished}))}
-                >
-                  {filters.showPublished ? "Не опубліковані" : "Опубліковані"}
-                </button>
+                {(() => {
+                  const activeTags = [
+                    ...(filters.source||[]).map(v=>({key:"source",val:v})),
+                    ...(filters.supplier||[]).map(v=>({key:"supplier",val:v})),
+                    ...(filters.brand||[]).map(v=>({key:"brand",val:v})),
+                    ...(filters.category||[]).map(v=>({key:"category",val:v})),
+                    ...(filters.color||[]).map(v=>({key:"color",val:v})),
+                    ...(filters.size||[]).map(v=>({key:"size",val:v})),
+                    ...(filters.gender||[]).map(v=>({key:"gender",val:v})),
+                    ...(filters.priceMin?[{key:"priceMin",val:`від ${filters.priceMin}`}]:[]),
+                    ...(filters.priceMax?[{key:"priceMax",val:`до ${filters.priceMax}`}]:[]),
+                    ...(filters.dateFrom?[{key:"dateFrom",val:`з ${filters.dateFrom}`}]:[]),
+                    ...(filters.dateTo?[{key:"dateTo",val:`до ${filters.dateTo}`}]:[]),
+                    ...(filters.search?[{key:"search",val:filters.search}]:[]),
+                  ];
+                  return activeTags.length > 0 ? (
+                    <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
+                      {activeTags.map(({key,val})=>(
+                        <span key={key+val} className="filter-tag" onClick={()=>{
+                          const arr = ["source","supplier","brand","category","color","size","gender"];
+                          if(arr.includes(key)) setFilters(f=>({...f,[key]:(f[key]||[]).filter(v=>v!==val)}));
+                          else setFilters(f=>({...f,[key]:""}));
+                        }}>
+                          {filterDisplayValue(key, val)} ✕
+                        </span>
+                      ))}
+                    </div>
+                  ) : null;
+                })()}
               </div>
               <div className="feed-toolbar-right">
                 {!filters.showPublished && <button className="btn-add" onClick={()=>setShowAdd(true)}>+ Додати товар</button>}
@@ -986,11 +1239,11 @@ export default function App() {
             {filtered.length===0
               ? <div className="empty-state">
                   {filters.showPublished
-                    ? <>😕 Опублікованих товарів немає.<br/>Спочатку опублікуйте товари зі стрічки.</>
-                    : <>😕 Товарів не знайдено.<br/><button className="link-btn" onClick={()=>setView("sources")}>Додайте джерела даних →</button></>
+                    ? <>📂 Ще нічого не опубліковано.<br/><span style={{fontSize:13,color:"var(--color-text-secondary)"}}>Поверніться до стрічки, оберіть товари та натисніть "Публікувати"</span></>
+                    : <>📦 Нових товарів немає.<br/><span style={{fontSize:13,color:"var(--color-text-secondary)"}}>Всі товари вже опубліковані або </span><button className="link-btn" onClick={()=>setView("sources")}>додайте нові джерела →</button></>
                   }
                 </div>
-              : <div className="feed-grid">{sorted.map(p=><ProductCard key={p.id} product={p} selected={selected.has(p.id)} onSelect={toggleSelect} published={isPublished(p)} onDelete={handleDelete} onView={setViewProduct}/>)}</div>
+              : <div className="feed-grid">{sorted.map(p=><ProductCard key={p.id} product={p} selected={selected.has(p.id)} onSelect={toggleSelect} published={isPublished(p)} onDelete={handleDelete} onView={setViewProduct} archived={p.archived}/>)}</div>
             }
           </div>
         </div>
@@ -1053,9 +1306,25 @@ export default function App() {
       )}
 
       {view==="settings" && <SettingsView serverOnline={serverOnline} onReset={()=>setPubV(v=>v+1)}/>}
+      {view==="archive" && <ArchiveView serverOnline={serverOnline} onSave={()=>setPubV(v=>v+1)} keywordCounts={archiveKeywordCounts}/>}
 
       {showAdd && <AddProductModal onClose={()=>setShowAdd(false)} onAdd={handleAdd} serverOnline={serverOnline}/>}
-      {viewProduct && <ProductViewModal product={viewProduct} onClose={()=>setViewProduct(null)} onDelete={handleDelete} onPublish={handlePublishOne} published={isPublished(viewProduct)}/>}
+      {viewProduct && (()=>{
+        const idx = sorted.findIndex(p => p.id === viewProduct.id);
+        return <ProductViewModal
+          product={viewProduct}
+          onClose={()=>setViewProduct(null)}
+          onDelete={handleDelete}
+          onPublish={handlePublishOne}
+          published={isPublished(viewProduct)}
+          onArchive={handleArchive}
+          archived={viewProduct.archived}
+          hasPrev={idx > 0}
+          hasNext={idx < sorted.length - 1}
+          onPrev={()=>{ if(idx > 0) setViewProduct(sorted[idx-1]); }}
+          onNext={()=>{ if(idx < sorted.length-1) setViewProduct(sorted[idx+1]); }}
+        />;
+      })()}
     </div>
   );
 }

@@ -20,7 +20,13 @@ import os
 import re
 from pathlib import Path
 from dotenv import load_dotenv
-from deduplication import filter_new, show_stats
+
+try:
+    from scripts.deduplication import filter_new, show_stats
+    from scripts.product_grouper import process_products
+except ModuleNotFoundError:
+    from deduplication import filter_new, show_stats
+    from product_grouper import process_products
 
 try:
     from telethon import TelegramClient
@@ -123,10 +129,14 @@ def is_product_text(text: str) -> bool:
     markers = [
         r"\d+\s*грн", r"ціна", r"price",
         r"розмір|size", r"колір|color",
-        r"бренд|brand", r"матеріал|material",
+        r"бренд|brand", r"матеріал|material", r"тканина|fabric",
         r"артикул|sku",
     ]
     return any(re.search(p, lower) for p in markers)
+
+
+def strip_line_marker(line: str) -> str:
+    return re.sub(r"^[\s\-–—➖✔️✅☑️•·]+", "", line).strip()
 
 
 def parse_text(text: str) -> dict:
@@ -137,13 +147,14 @@ def parse_text(text: str) -> dict:
         "condition": "Нове", "description": text,
     }
     for line in lines:
+        line = strip_line_marker(line.strip())
         lower = line.lower()
         val   = line.split(":", 1)[-1].strip() if ":" in line else ""
 
         if lower.startswith(("бренд", "brand")):         fields["brand"]    = val
         elif lower.startswith(("розмір", "size")):       fields["size"]     = val
         elif lower.startswith(("колір", "color")):       fields["color"]    = val
-        elif lower.startswith(("матеріал", "material")): fields["material"] = val
+        elif lower.startswith(("матеріал", "material", "тканина", "fabric")): fields["material"] = val
         elif lower.startswith(("стан", "condition")):    fields["condition"]= val
         elif lower.startswith(("артикул", "sku")):       fields["sku"]      = val
         elif lower.startswith(("ціна", "price")) or "грн" in lower:
@@ -152,7 +163,7 @@ def parse_text(text: str) -> dict:
                 fields["price"] = m.group()
 
     for line in lines:
-        s = line.strip()
+        s = strip_line_marker(line.strip())
         if s and ":" not in s and not re.fullmatch(r"[\d\s.,\-]+", s):
             fields["name"] = s
             break
@@ -389,13 +400,19 @@ async def fetch_all_products() -> list[dict]:
 async def main():
     products = await fetch_all_products()
 
-    new_products, skipped = filter_new(products, source="telegram")
+    # Групуємо варіації (різні кольори одного товару) перед дедуплікацією
+    print(f"\n🔄 Групування варіацій товарів...")
+    grouped_products = process_products(products)
+    print(f"   ✅ {len(products)} товарів → {len(grouped_products)} після групування")
+
+    new_products, skipped = filter_new(grouped_products, source="telegram")
 
     if new_products:
         print(f"\n📋 Нові товари для публікації ({len(new_products)}):")
         for p in new_products:
             photo_count = len(p["photos"].split(",")) if p["photos"] else 0
-            print(f"  - {p['name']} | {p['price']} грн | фото: {photo_count} | {p['post_url']}")
+            variations_info = f" [{p.get('variations_count', 1)} варіацій]" if p.get('variations_count', 1) > 1 else ""
+            print(f"  - {p['name']}{variations_info} | {p['price']} грн | фото: {photo_count} | {p['post_url']}")
     else:
         print("\n✓ Нових товарів немає")
 

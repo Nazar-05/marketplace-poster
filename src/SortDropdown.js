@@ -19,17 +19,16 @@ export default function SortDropdown({ value, onChange }) {
   }, []);
 
   return (
-    <div ref={ref} style={{ position: "relative", minWidth: 230 }}>
+    <div ref={ref} style={{ position: "relative", minWidth: 160 }}>
       <div
-        className={`sort-select-btn ${open ? "open" : ""}`}
+        className="btn-sm"
         onClick={() => setOpen(o => !o)}
+        style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", userSelect:"none" }}
       >
-        <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          <span style={{ fontSize: 15 }}>{selected.icon}</span>
-          <span>{selected.label}</span>
-        </span>
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
-          style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s", flexShrink: 0 }}>
+        <span>{selected.icon}</span>
+        <span style={{flex:1}}>{selected.label}</span>
+        <svg width="10" height="10" viewBox="0 0 12 12" fill="none"
+          style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s", flexShrink:0, opacity:.5 }}>
           <path d="M2 4L6 8L10 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
       </div>
